@@ -377,7 +377,7 @@
   <div id="sr-status" class="visually-hidden" aria-live="polite"></div>
 
   <script>
-    const CURRENT_VERSION = "20260616.03";
+    const CURRENT_VERSION = "20260616.04";
     async function checkAppVersion() {
       try {
         const res = await fetch('version.json?t=' + Date.now());
@@ -514,6 +514,7 @@
         title: "เบิกสินค้า (บิลจัด)",
         header: "bg-brand-blue text-white",
         button: "bg-brand-blue border-brand-blue",
+        idle: "border-blue-700 text-blue-700",
         badge: "bg-blue-100 text-blue-800"
       },
       "บิลด่วน": {
@@ -521,6 +522,7 @@
         title: "เบิกสินค้า (บิลด่วน)",
         header: "bg-red-600 text-white",
         button: "bg-red-600 border-red-600",
+        idle: "border-red-600 text-red-600",
         badge: "bg-red-100 text-red-800"
       },
       "บิลสินค้าเรียงหน้าร้าน": {
@@ -528,6 +530,7 @@
         title: "เบิกสินค้า (บิลสินค้าเรียงหน้าร้าน)",
         header: "bg-white text-slate-800 border-b border-slate-200",
         button: "bg-slate-700 border-slate-700",
+        idle: "border-slate-500 text-slate-700",
         badge: "bg-slate-100 text-slate-700"
       }
     };
@@ -762,12 +765,17 @@
       state.billType = type;
       document.querySelectorAll(".bill-type-btn").forEach(function (btn) {
         const btnType = btn.dataset.type;
+        const info = BILL_TYPES[btnType];
         const active = btnType === type;
-        btn.classList.toggle("type-active", active);
-        btn.classList.remove("bg-brand-blue", "bg-red-600", "bg-slate-700", "border-brand-blue", "border-red-600", "border-slate-700", "text-white");
+        btn.classList.remove("type-active", "text-white", "bg-white");
+        info.button.split(" ").forEach(function (cls) { btn.classList.remove(cls); });
+        info.idle.split(" ").forEach(function (cls) { btn.classList.remove(cls); });
         if (active) {
-          BILL_TYPES[type].button.split(" ").forEach(function (cls) { btn.classList.add(cls); });
-          btn.classList.add("text-white");
+          btn.classList.add("type-active", "text-white");
+          info.button.split(" ").forEach(function (cls) { btn.classList.add(cls); });
+        } else {
+          btn.classList.add("bg-white");
+          info.idle.split(" ").forEach(function (cls) { btn.classList.add(cls); });
         }
       });
       renderPreview();
