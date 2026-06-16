@@ -183,6 +183,11 @@
   </div>
 
   <div id="app-shell" class="hidden min-h-screen">
+    <div id="data-loading" class="fixed inset-0 z-[60] bg-white/85 backdrop-blur-sm flex flex-col items-center justify-center text-center p-6">
+      <div class="w-12 h-12 rounded-full border-4 border-slate-200 border-t-brand-blue animate-spin mb-3"></div>
+      <p class="font-semibold text-brand-blue">กำลังเตรียมข้อมูล...</p>
+      <p class="text-sm text-slate-500 mt-1">โหลดรายการสินค้า กรุณารอสักครู่</p>
+    </div>
     <header class="bg-brand-blue text-white sticky top-0 z-40 shadow-sm">
       <div class="max-w-6xl mx-auto px-4">
         <div class="h-16 flex items-center justify-between gap-3">
@@ -382,7 +387,7 @@
   <div id="sr-status" class="visually-hidden" aria-live="polite"></div>
 
   <script>
-    const CURRENT_VERSION = "20260616.06";
+    const CURRENT_VERSION = "20260616.07";
     async function checkAppVersion() {
       try {
         const res = await fetch('version.json?t=' + Date.now());
@@ -744,6 +749,8 @@
       } catch (e) {
         $("form-status").textContent = "โหลดข้อมูลไม่สำเร็จ";
         toast(e.message, "error");
+      } finally {
+        $("data-loading").classList.add("hidden");
       }
     }
 
@@ -966,7 +973,14 @@
 
     async function submitRequisition(event) {
       event.preventDefault();
-      if (state.isSubmitting || !validateSubmit()) return;
+      if (state.isSubmitting) return;
+      // auto-add a product that was selected/typed but not yet added to the list
+      if ($("product-input").value.trim()) {
+        const before = state.items.length;
+        addItem();
+        if (state.items.length === before) return; // addItem failed (toast already shown)
+      }
+      if (!validateSubmit()) return;
       state.isSubmitting = true;
       $("submit-btn").disabled = true;
       $("form-status").textContent = "กำลังส่งเข้า LINE...";
