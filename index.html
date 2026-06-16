@@ -1,0 +1,1152 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="preconnect" href="https://script.google.com">
+  <title>เบิกสินค้า AKRA</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: { blue: '#171C8F', orange: '#E35205' },
+            line: { green: '#06C755' }
+          },
+          fontFamily: { sans: ['Sarabun', 'system-ui', 'sans-serif'] }
+        }
+      }
+    };
+  </script>
+  <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      color-scheme: light;
+      --brand-blue: #171C8F;
+      --brand-orange: #E35205;
+      --line-green: #06C755;
+      --surface: #ffffff;
+      --muted: #64748b;
+      --border: #d7deea;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: 'Sarabun', system-ui, sans-serif;
+      letter-spacing: 0;
+      color: #172033;
+      background: #eef2f7;
+      -webkit-tap-highlight-color: transparent;
+    }
+    button, input, select {
+      font: inherit;
+    }
+    :where(a, button, input, select):focus-visible {
+      outline: 3px solid rgba(227, 82, 5, 0.55);
+      outline-offset: 2px;
+    }
+    .visually-hidden:where(:not(:focus-within, :active)) {
+      position: absolute !important;
+      clip-path: inset(50%) !important;
+      overflow: hidden !important;
+      width: 1px !important;
+      height: 1px !important;
+      margin: -1px !important;
+      padding: 0 !important;
+      border: 0 !important;
+      white-space: nowrap !important;
+    }
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+    }
+    .btn {
+      min-height: 2.75rem;
+      border-radius: 8px;
+      border: 1px solid transparent;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      font-weight: 700;
+      transition: transform 0.15s ease, background-color 0.15s ease, border-color 0.15s ease;
+    }
+    .btn:active { transform: translateY(1px); }
+    .btn:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
+    .input {
+      width: 100%;
+      min-height: 2.75rem;
+      border-radius: 8px;
+      border: 1px solid #cbd5e1;
+      background: #fff;
+      padding: 0.625rem 0.75rem;
+      color: #172033;
+    }
+    .input[aria-invalid="true"] {
+      border-color: #dc2626;
+      background: #fff7f7;
+    }
+    .tab-active {
+      background: var(--brand-blue);
+      color: #fff;
+      border-color: var(--brand-blue);
+    }
+    .type-active {
+      color: #fff !important;
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.45);
+    }
+    .toast-container {
+      position: fixed;
+      top: 1rem;
+      right: 1rem;
+      z-index: 10000;
+      display: grid;
+      gap: 0.5rem;
+      max-width: min(24rem, calc(100vw - 2rem));
+    }
+    .toast {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-left-width: 5px;
+      border-radius: 8px;
+      padding: 0.75rem 0.9rem;
+      box-shadow: 0 10px 20px rgba(15, 23, 42, 0.12);
+      font-size: 0.9rem;
+    }
+    .toast.success { border-left-color: #16a34a; }
+    .toast.warning { border-left-color: #d97706; }
+    .toast.error { border-left-color: #dc2626; }
+    .line-chat {
+      background: #88a7c7;
+      background-image: radial-gradient(rgba(255,255,255,0.12) 1px, transparent 1px);
+      background-size: 14px 14px;
+    }
+    .line-card {
+      width: min(100%, 21rem);
+      border-radius: 8px;
+      overflow: hidden;
+      background: #fff;
+      box-shadow: 0 3px 10px rgba(15, 23, 42, 0.18);
+    }
+    .autocomplete-list {
+      position: absolute;
+      z-index: 50;
+      top: calc(100% + 0.25rem);
+      left: 0;
+      right: 0;
+      max-height: 16rem;
+      overflow-y: auto;
+      background: #fff;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      box-shadow: 0 14px 24px rgba(15, 23, 42, 0.14);
+    }
+    .autocomplete-option[aria-selected="true"] {
+      background: #e8e9f8;
+      color: var(--brand-blue);
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.001ms !important;
+        animation-iteration-count: 1 !important;
+        scroll-behavior: auto !important;
+        transition-duration: 0.001ms !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <a class="visually-hidden" href="#main-content">ข้ามไปเนื้อหา</a>
+
+  <div id="auth-loading" class="fixed inset-0 z-[9999] bg-white flex flex-col items-center justify-center p-6 text-center">
+    <div class="w-14 h-14 rounded-full border-4 border-slate-200 border-t-brand-blue animate-spin mb-4"></div>
+    <p class="font-semibold text-brand-blue">กำลังตรวจสอบสิทธิ์...</p>
+  </div>
+
+  <div id="auth-error" class="fixed inset-0 z-[9999] hidden bg-white p-6">
+    <div class="min-h-full flex items-center justify-center">
+      <div class="panel max-w-md w-full p-6 text-center">
+        <i data-lucide="shield-alert" class="w-14 h-14 mx-auto text-red-600 mb-3"></i>
+        <h1 class="text-xl font-bold mb-2">เข้าใช้งานไม่ได้</h1>
+        <p id="error-message" class="text-slate-600 mb-5">กรุณาเข้าสู่ระบบใหม่</p>
+        <button id="portal-btn" type="button" class="btn w-full bg-brand-blue text-white">
+          <i data-lucide="log-in" class="w-4 h-4"></i>
+          กลับไป Portal
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div id="app-shell" class="hidden min-h-screen">
+    <header class="bg-brand-blue text-white sticky top-0 z-40 shadow-sm">
+      <div class="max-w-6xl mx-auto px-4">
+        <div class="h-16 flex items-center justify-between gap-3">
+          <div class="flex items-center gap-3 min-w-0">
+            <div class="w-9 h-9 rounded-lg bg-white/12 border border-white/20 flex items-center justify-center shrink-0">
+              <i data-lucide="package-check" class="w-5 h-5"></i>
+            </div>
+            <div class="min-w-0">
+              <h1 class="font-bold leading-tight truncate">เบิกสินค้า AKRA</h1>
+              <p class="text-xs text-white/75 truncate">
+                <span id="display-username">-</span>
+                <span aria-hidden="true"> · </span>
+                <span id="display-role">-</span>
+              </p>
+            </div>
+          </div>
+          <div class="flex items-center gap-2">
+            <button id="refresh-btn" type="button" class="btn h-10 min-h-10 px-3 bg-white/10 text-white border-white/20 hover:bg-white/20" title="รีเฟรชข้อมูล">
+              <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+              <span class="hidden sm:inline">รีเฟรช</span>
+            </button>
+            <button id="logout-btn" type="button" class="btn h-10 min-h-10 px-3 bg-white text-brand-blue hover:bg-blue-50" title="ออกจากระบบ">
+              <i data-lucide="log-out" class="w-4 h-4"></i>
+              <span class="hidden sm:inline">ออก</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main id="main-content" tabindex="-1" class="max-w-6xl mx-auto px-4 py-4 sm:py-6">
+      <nav aria-label="มุมมองหลัก" class="grid grid-cols-2 gap-2 mb-4">
+        <button id="tab-new" type="button" class="btn border-slate-300 bg-white text-slate-700 tab-active">
+          <i data-lucide="clipboard-plus" class="w-4 h-4"></i>
+          เบิกสินค้า
+        </button>
+        <button id="tab-history" type="button" class="btn border-slate-300 bg-white text-slate-700">
+          <i data-lucide="history" class="w-4 h-4"></i>
+          ประวัติ
+        </button>
+      </nav>
+
+      <section id="pane-new" aria-labelledby="tab-new">
+        <div class="grid lg:grid-cols-[minmax(0,1.1fr)_minmax(22rem,0.9fr)] gap-4">
+          <form id="requisition-form" class="panel p-4 sm:p-5 space-y-5" novalidate>
+            <div>
+              <h2 class="text-lg font-bold">รายการเบิกสินค้า</h2>
+              <p id="form-status" class="text-sm text-slate-500 mt-1" aria-live="polite">พร้อมทำรายการ</p>
+            </div>
+
+            <fieldset>
+              <legend class="text-sm font-bold text-slate-700 mb-2">ประเภทบิล</legend>
+              <div id="bill-type-group" class="grid grid-cols-3 gap-2">
+                <button type="button" class="bill-type-btn btn border-blue-700 text-blue-700 bg-white" data-type="บิลจัด">
+                  <i data-lucide="book-open" class="w-4 h-4"></i>
+                  <span>บิลจัด</span>
+                </button>
+                <button type="button" class="bill-type-btn btn border-red-600 text-red-600 bg-white" data-type="บิลด่วน">
+                  <i data-lucide="siren" class="w-4 h-4"></i>
+                  <span>บิลด่วน</span>
+                </button>
+                <button type="button" class="bill-type-btn btn border-slate-500 text-slate-700 bg-white text-sm leading-tight" data-type="บิลสินค้าเรียงหน้าร้าน">
+                  <i data-lucide="store" class="w-4 h-4"></i>
+                  <span>บิลเรียง</span>
+                </button>
+              </div>
+            </fieldset>
+
+            <div class="grid md:grid-cols-[minmax(0,1fr)_7rem_8rem] gap-3 items-end">
+              <div class="relative">
+                <label for="product-input" class="text-sm font-bold text-slate-700">สินค้า</label>
+                <input id="product-input" class="input mt-1" type="text" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="product-results" aria-autocomplete="list" placeholder="พิมพ์ชื่อสินค้า" required>
+                <div id="product-results" class="autocomplete-list hidden" role="listbox"></div>
+                <p id="product-warning" class="hidden mt-1 text-sm text-brand-orange" aria-live="polite">ไม่พบในรายการสินค้า จะเพิ่มเป็นชื่อใหม่</p>
+              </div>
+              <div>
+                <label for="qty-input" class="text-sm font-bold text-slate-700">จำนวน</label>
+                <input id="qty-input" class="input mt-1 text-center" type="number" min="1" step="1" inputmode="numeric" value="1" required>
+              </div>
+              <div>
+                <label for="unit-input" class="text-sm font-bold text-slate-700">หน่วย</label>
+                <input id="unit-input" class="input mt-1" type="text" list="unit-options" value="ลัง" required>
+                <datalist id="unit-options">
+                  <option value="ลัง"></option>
+                  <option value="แพ็ค"></option>
+                  <option value="ชิ้น"></option>
+                  <option value="ถุง"></option>
+                  <option value="กล่อง"></option>
+                </datalist>
+              </div>
+            </div>
+
+            <button id="add-item-btn" type="button" class="btn w-full bg-brand-blue text-white hover:bg-[#11146B]">
+              <i data-lucide="plus" class="w-5 h-5"></i>
+              เพิ่มรายการ
+            </button>
+
+            <div>
+              <div class="flex items-center justify-between gap-3 mb-2">
+                <h3 class="font-bold">รายการในบิล</h3>
+                <span class="text-sm text-slate-500"><span id="item-count">0</span> รายการ</span>
+              </div>
+              <ul id="item-list" class="space-y-2"></ul>
+              <p id="empty-items" class="panel border-dashed text-center text-slate-500 p-4">ยังไม่มีรายการ</p>
+            </div>
+
+            <div>
+              <label for="staff-select" class="text-sm font-bold text-slate-700">มอบให้พนักงาน</label>
+              <select id="staff-select" class="input mt-1" required>
+                <option value="">เลือกพนักงาน</option>
+              </select>
+            </div>
+
+            <button id="submit-btn" type="submit" class="btn w-full bg-line-green text-white hover:bg-[#05ae49]">
+              <i data-lucide="send" class="w-5 h-5"></i>
+              ส่งเข้า LINE กลุ่ม
+            </button>
+          </form>
+
+          <aside class="panel overflow-hidden" aria-label="ตัวอย่าง LINE">
+            <div class="p-4 border-b border-slate-200 flex items-center justify-between gap-3">
+              <div>
+                <h2 class="font-bold">ตัวอย่าง LINE</h2>
+                <p class="text-sm text-slate-500">Flex card ก่อนส่ง</p>
+              </div>
+              <span id="preview-status" class="text-xs font-bold rounded-full px-2.5 py-1 bg-slate-100 text-slate-600">รอจัด</span>
+            </div>
+            <div class="line-chat p-4 min-h-[34rem]">
+              <div class="bg-white/85 rounded-lg px-3 py-2 text-sm font-bold text-slate-700 text-center mb-4">กลุ่มคลัง AKRA</div>
+              <div class="flex items-start gap-2">
+                <div class="w-9 h-9 rounded-full bg-brand-blue text-white flex items-center justify-center shrink-0">
+                  <i data-lucide="bot" class="w-5 h-5"></i>
+                </div>
+                <div class="line-card">
+                  <div id="line-card-header" class="px-4 py-3 font-bold text-white bg-brand-blue">
+                    <span id="line-card-title">เบิกสินค้า (บิลจัด)</span>
+                  </div>
+                  <div class="p-4">
+                    <ul id="line-preview-items" class="space-y-1 text-sm text-slate-700"></ul>
+                    <div class="border-t border-slate-200 mt-3 pt-3">
+                      <div class="text-xs text-slate-500">มอบให้</div>
+                      <div id="line-preview-staff" class="font-bold text-slate-800">-</div>
+                    </div>
+                    <div id="line-preview-meta" class="text-xs text-slate-400 mt-3">บิลใหม่</div>
+                  </div>
+                  <div class="p-3 pt-0 grid gap-2">
+                    <button type="button" class="btn min-h-10 bg-line-green text-white pointer-events-none">
+                      <i data-lucide="check" class="w-4 h-4"></i>
+                      จัดเสร็จ
+                    </button>
+                    <button type="button" class="btn min-h-10 bg-white border-brand-orange text-brand-orange pointer-events-none">
+                      <i data-lucide="triangle-alert" class="w-4 h-4"></i>
+                      มีปัญหา
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <section id="pane-history" class="hidden" aria-labelledby="tab-history">
+        <div class="panel p-4 sm:p-5">
+          <div class="flex flex-col md:flex-row md:items-end gap-3 mb-4">
+            <div class="flex-1">
+              <label for="history-search" class="text-sm font-bold text-slate-700">ค้นสินค้า</label>
+              <input id="history-search" class="input mt-1" type="search" placeholder="ชื่อสินค้าหรือเลขบิล">
+            </div>
+            <div class="md:w-44">
+              <label for="history-date" class="text-sm font-bold text-slate-700">วันที่</label>
+              <input id="history-date" class="input mt-1" type="date">
+            </div>
+            <div class="md:w-56">
+              <label for="history-type" class="text-sm font-bold text-slate-700">ประเภท</label>
+              <select id="history-type" class="input mt-1">
+                <option value="">ทุกประเภท</option>
+                <option>บิลจัด</option>
+                <option>บิลด่วน</option>
+                <option>บิลสินค้าเรียงหน้าร้าน</option>
+              </select>
+            </div>
+          </div>
+          <div id="history-list" class="grid gap-3"></div>
+          <p id="history-empty" class="panel border-dashed text-center text-slate-500 p-5 hidden">ไม่พบรายการที่ตรงกับเงื่อนไข</p>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="toast-container" class="toast-container" aria-live="polite" aria-atomic="true"></div>
+  <div id="sr-status" class="visually-hidden" aria-live="polite"></div>
+
+  <script>
+    const CURRENT_VERSION = "20260616.01";
+    async function checkAppVersion() {
+      try {
+        const res = await fetch('version.json?t=' + Date.now());
+        if (!res.ok) return true;
+        const config = await res.json();
+        if (config && config.version && config.version !== CURRENT_VERSION) {
+          alert('พบเวอร์ชันใหม่ กำลังอัปเดตระบบ...');
+          const url = new URL(window.location.href);
+          url.searchParams.set('update', Date.now());
+          window.location.replace(url.toString());
+          return false;
+        }
+      } catch (e) {
+        console.warn('Version check skipped:', e);
+      }
+      return true;
+    }
+
+    const AppVersionGuard = (function () {
+      var cfg = { current: '', readActions: [] };
+      var stale = false, started = false;
+      var POLL_MS = 5 * 60 * 1000;
+      function reload() {
+        var url = new URL(window.location.href);
+        url.searchParams.set('update', Date.now());
+        window.location.replace(url.toString());
+      }
+      function injectStyles() {
+        if (document.getElementById('avg-style')) return;
+        var s = document.createElement('style');
+        s.id = 'avg-style';
+        s.textContent = '#avg-banner{position:fixed;top:0;left:0;right:0;z-index:2147483646;background:#E35205;color:#fff;font:600 14px/1.4 system-ui,sans-serif;padding:10px 14px;display:flex;gap:12px;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,.2)}#avg-banner button{cursor:pointer;border:0;border-radius:8px;font-weight:700;padding:8px 16px;background:#fff;color:#E35205}#avg-modal{position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:20px}#avg-modal .avg-card{background:#fff;color:#1f2937;max-width:380px;width:100%;border-radius:16px;padding:24px;text-align:center;font:400 15px/1.5 system-ui,sans-serif;box-shadow:0 12px 40px rgba(0,0,0,.3)}#avg-modal .avg-card h2{font-size:18px;font-weight:800;margin:0 0 8px}#avg-modal .avg-card button{cursor:pointer;border:0;margin-top:16px;background:#E35205;color:#fff;width:100%;padding:12px;border-radius:8px;font-weight:700}';
+        document.head.appendChild(s);
+      }
+      function showBanner() {
+        injectStyles();
+        if (document.getElementById('avg-banner')) return;
+        var bar = document.createElement('div');
+        bar.id = 'avg-banner';
+        bar.setAttribute('role', 'status');
+        bar.setAttribute('aria-live', 'polite');
+        var msg = document.createElement('span');
+        msg.textContent = 'มีเวอร์ชันใหม่ของระบบ กรุณารีโหลดเพื่ออัปเดต';
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.textContent = 'รีโหลด';
+        btn.addEventListener('click', reload);
+        bar.appendChild(msg);
+        bar.appendChild(btn);
+        document.body.appendChild(bar);
+      }
+      function showModal() {
+        injectStyles();
+        var existing = document.getElementById('avg-modal');
+        if (existing) { existing.querySelector('button').focus(); return; }
+        var m = document.createElement('div');
+        m.id = 'avg-modal';
+        m.setAttribute('role', 'alertdialog');
+        m.setAttribute('aria-modal', 'true');
+        m.setAttribute('aria-labelledby', 'avg-modal-title');
+        var card = document.createElement('div');
+        card.className = 'avg-card';
+        var h = document.createElement('h2');
+        h.id = 'avg-modal-title';
+        h.textContent = 'ต้องอัปเดตระบบ';
+        var p = document.createElement('div');
+        p.setAttribute('aria-live', 'assertive');
+        p.textContent = 'พบเวอร์ชันใหม่ ไม่สามารถบันทึกจากหน้าเดิมได้ กรุณารีโหลดก่อนทำรายการ';
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.textContent = 'รีโหลดเดี๋ยวนี้';
+        btn.addEventListener('click', reload);
+        card.appendChild(h);
+        card.appendChild(p);
+        card.appendChild(btn);
+        m.appendChild(card);
+        document.body.appendChild(m);
+        btn.focus();
+      }
+      async function fetchRemote() {
+        try {
+          var res = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' });
+          if (!res.ok) return null;
+          var c = await res.json();
+          return (c && c.version) ? String(c.version) : null;
+        } catch (e) { console.warn('Version check skipped:', e); return null; }
+      }
+      function markStale() {
+        if (stale) return;
+        stale = true;
+        showBanner();
+      }
+      async function check() {
+        if (stale) return false;
+        var remote = await fetchRemote();
+        if (remote && remote !== cfg.current) { markStale(); return false; }
+        return true;
+      }
+      async function blockIfStale(action) {
+        if (action && cfg.readActions.indexOf(action) !== -1) return false;
+        if (!stale) await check();
+        if (!stale) return false;
+        showModal();
+        return true;
+      }
+      function start(options) {
+        cfg.current = options.current;
+        cfg.readActions = options.readActions || [];
+        if (started) return;
+        started = true;
+        setInterval(check, POLL_MS);
+        document.addEventListener('visibilitychange', function () {
+          if (document.visibilityState === 'visible') check();
+        });
+        window.addEventListener('focus', check);
+        window.addEventListener('pageshow', function (e) { if (e.persisted) check(); });
+      }
+      return { start: start, check: check, blockIfStale: blockIfStale, reloadNow: reload };
+    })();
+
+    const APP_CONFIG = {
+      API_URL: "https://script.google.com/macros/s/AKfycbyQJLwb5HTexG6gxqTehGWlAxfSXVT--CpWnnp2JTcP4xCcMA1vUjSY_eWqPjUKwzq7/exec",
+      PORTAL_URL: "https://akra-web.github.io/Main/",
+      APP_ID: "app-pick",
+      REQUIRED_ROLES: ["ADMIN", "SUPERVISOR", "AKRA", "WAREHOUSE"],
+      STORAGE_KEY: "akra_pick_session"
+    };
+
+    var DATA_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzOp0_a5NF2EoNvpcI8yOqCq2OILMAhdXH9XtyLXrw8fHWPjWAPAGGVutpkuGwcyNo/exec";
+
+    const BILL_TYPES = {
+      "บิลจัด": {
+        icon: "book-open",
+        title: "เบิกสินค้า (บิลจัด)",
+        header: "bg-brand-blue text-white",
+        button: "bg-brand-blue border-brand-blue",
+        badge: "bg-blue-100 text-blue-800"
+      },
+      "บิลด่วน": {
+        icon: "siren",
+        title: "เบิกสินค้า (บิลด่วน)",
+        header: "bg-red-600 text-white",
+        button: "bg-red-600 border-red-600",
+        badge: "bg-red-100 text-red-800"
+      },
+      "บิลสินค้าเรียงหน้าร้าน": {
+        icon: "store",
+        title: "เบิกสินค้า (บิลสินค้าเรียงหน้าร้าน)",
+        header: "bg-white text-slate-800 border-b border-slate-200",
+        button: "bg-slate-700 border-slate-700",
+        badge: "bg-slate-100 text-slate-700"
+      }
+    };
+
+    const SAMPLE_DATA = {
+      products: [
+        { id: "P001", name: "กลิ่นนมเนยครีม(ใหญ่)", defaultUnit: "ลัง", active: true },
+        { id: "P002", name: "กลิ่นใบเตยครีม(ใหญ่)", defaultUnit: "ลัง", active: true },
+        { id: "P003", name: "กลิ่นกาแฟ", defaultUnit: "ลัง", active: true },
+        { id: "P004", name: "นมข้นหวาน", defaultUnit: "ลัง", active: true },
+        { id: "P005", name: "ผงวุ้น", defaultUnit: "ถุง", active: true }
+      ],
+      staff: [
+        { name: "PeTer 2️⃣⏺️⏺️2️⃣", active: true },
+        { name: "หมวย", active: true },
+        { name: "โอ๊ต", active: true }
+      ],
+      requisitions: []
+    };
+
+    const state = {
+      session: null,
+      products: [],
+      staff: [],
+      requisitions: [],
+      items: [],
+      billType: "บิลจัด",
+      selectedProduct: null,
+      productResults: [],
+      activeProductIndex: -1,
+      activeTab: "new",
+      isSubmitting: false
+    };
+
+    const el = {};
+
+    function $(id) {
+      return document.getElementById(id);
+    }
+
+    function refreshIcons() {
+      if (window.lucide) window.lucide.createIcons();
+    }
+
+    function esc(value) {
+      return String(value == null ? "" : value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+
+    function normalizeText(value) {
+      return String(value || "").trim().replace(/\s+/g, " ").toLowerCase();
+    }
+
+    function normalizeRoles(roles) {
+      if (Array.isArray(roles)) return roles.map(function (r) { return String(r || "").trim().toUpperCase(); }).filter(Boolean);
+      return String(roles || "").split(",").map(function (r) { return r.trim().toUpperCase(); }).filter(Boolean);
+    }
+
+    function getPickPerms(session) {
+      return ((session && session.perms && session.perms[APP_CONFIG.APP_ID]) || []).map(String);
+    }
+
+    function hasPickAccess(session) {
+      if (!session) return false;
+      if (getPickPerms(session).length > 0) return true;
+      const roles = normalizeRoles(session.roles);
+      return roles.some(function (role) { return APP_CONFIG.REQUIRED_ROLES.indexOf(role) !== -1; });
+    }
+
+    function showLoading() {
+      $("auth-loading").classList.remove("hidden");
+      $("auth-error").classList.add("hidden");
+      $("app-shell").classList.add("hidden");
+    }
+
+    function showError(message) {
+      $("auth-loading").classList.add("hidden");
+      $("auth-error").classList.remove("hidden");
+      $("app-shell").classList.add("hidden");
+      $("error-message").textContent = message;
+      refreshIcons();
+    }
+
+    function showApp() {
+      $("auth-loading").classList.add("hidden");
+      $("auth-error").classList.add("hidden");
+      $("app-shell").classList.remove("hidden");
+      $("display-username").textContent = state.session.name || "ผู้ใช้งาน";
+      $("display-role").textContent = normalizeRoles(state.session.roles).join(", ") || "USER";
+      refreshIcons();
+    }
+
+    function toast(message, type) {
+      const node = document.createElement("div");
+      node.className = "toast " + (type || "success");
+      node.textContent = message;
+      $("toast-container").appendChild(node);
+      $("sr-status").textContent = message;
+      window.setTimeout(function () { node.remove(); }, 4500);
+    }
+
+    function isPreviewEnv() {
+      return window.location.hostname === "" ||
+        window.location.hostname === "localhost" ||
+        window.location.hostname === "127.0.0.1" ||
+        window.location.hostname === "::1" ||
+        window.location.hostname.includes("googleusercontent") ||
+        window.self !== window.top;
+    }
+
+    async function verifySsoToken(token) {
+      const verifyUrl = APP_CONFIG.API_URL + "?action=verifyToken&token=" + encodeURIComponent(token);
+      const res = await fetch(verifyUrl);
+      if (!res.ok) throw new Error("verify_failed");
+      const result = await res.json();
+      if (!result || !result.valid || !result.user) {
+        throw new Error((result && result.reason) || "invalid_or_expired_token");
+      }
+      const user = result.user;
+      return {
+        token: token,
+        id: user.id || "",
+        name: user.name || "",
+        roles: normalizeRoles(user.roles),
+        perms: user.perms || {}
+      };
+    }
+
+    async function apiCall(action, data) {
+      if (action !== "getInitialData" && await AppVersionGuard.blockIfStale(action)) {
+        throw new Error("พบเวอร์ชันใหม่ กรุณารีโหลดก่อนทำรายการ");
+      }
+      if (!DATA_SCRIPT_URL) {
+        return mockApi(action, data);
+      }
+      const res = await fetch(DATA_SCRIPT_URL, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({
+          action: action,
+          data: data || {},
+          token: state.session && state.session.token
+        })
+      });
+      const text = await res.text();
+      let result;
+      try {
+        result = JSON.parse(text);
+      } catch (e) {
+        throw new Error("อ่านผลลัพธ์จากเซิร์ฟเวอร์ไม่ได้");
+      }
+      if (!result || result.success === false || result.status === "error") {
+        throw new Error((result && result.message) || "ทำรายการไม่สำเร็จ");
+      }
+      return result;
+    }
+
+    function mockApi(action, data) {
+      if (!isPreviewEnv()) {
+        return Promise.reject(new Error("ยังไม่ได้ตั้งค่า DATA_SCRIPT_URL หลัง deploy GAS"));
+      }
+      if (action === "getInitialData") {
+        return Promise.resolve(JSON.parse(JSON.stringify(Object.assign({ success: true }, SAMPLE_DATA))));
+      }
+      if (action === "saveRequisition") {
+        const now = new Date();
+        const req = {
+          uid: "PREVIEW-" + now.getTime(),
+          timestamp: now.toISOString(),
+          billType: data.billType,
+          requester: state.session.name,
+          assignee: data.assignee,
+          items: data.items,
+          lineStatus: "pending",
+          doneBy: "",
+          doneAt: ""
+        };
+        return Promise.resolve({ success: true, requisition: req, preview: true });
+      }
+      return Promise.reject(new Error("Mock action not found"));
+    }
+
+    async function loadInitialData(silent) {
+      try {
+        if (!silent) $("form-status").textContent = "กำลังโหลดข้อมูล...";
+        const result = await apiCall("getInitialData");
+        state.products = (result.products || []).filter(function (p) { return p.active !== false; });
+        state.staff = (result.staff || []).filter(function (s) { return s.active !== false; });
+        state.requisitions = result.requisitions || [];
+        renderStaff();
+        renderHistory();
+        renderPreview();
+        $("form-status").textContent = "พร้อมทำรายการ";
+      } catch (e) {
+        $("form-status").textContent = "โหลดข้อมูลไม่สำเร็จ";
+        toast(e.message, "error");
+      }
+    }
+
+    function renderStaff() {
+      const select = $("staff-select");
+      select.innerHTML = '<option value="">เลือกพนักงาน</option>';
+      state.staff.forEach(function (staff) {
+        const option = document.createElement("option");
+        option.value = staff.name;
+        option.textContent = staff.name;
+        select.appendChild(option);
+      });
+      if (state.staff.length === 0) {
+        const option = document.createElement("option");
+        option.value = "";
+        option.textContent = "ยังไม่มีข้อมูล Staff";
+        select.appendChild(option);
+      }
+    }
+
+    function setTab(tab) {
+      state.activeTab = tab;
+      $("pane-new").classList.toggle("hidden", tab !== "new");
+      $("pane-history").classList.toggle("hidden", tab !== "history");
+      $("tab-new").classList.toggle("tab-active", tab === "new");
+      $("tab-history").classList.toggle("tab-active", tab === "history");
+      if (tab === "history") renderHistory();
+      refreshIcons();
+    }
+
+    function setBillType(type) {
+      state.billType = type;
+      document.querySelectorAll(".bill-type-btn").forEach(function (btn) {
+        const btnType = btn.dataset.type;
+        const active = btnType === type;
+        btn.classList.toggle("type-active", active);
+        btn.classList.remove("bg-brand-blue", "bg-red-600", "bg-slate-700", "border-brand-blue", "border-red-600", "border-slate-700", "text-white");
+        if (active) {
+          BILL_TYPES[type].button.split(" ").forEach(function (cls) { btn.classList.add(cls); });
+          btn.classList.add("text-white");
+        }
+      });
+      renderPreview();
+    }
+
+    function searchProducts() {
+      const q = normalizeText($("product-input").value);
+      state.selectedProduct = null;
+      state.activeProductIndex = -1;
+      if (!q) {
+        state.productResults = [];
+        renderProductResults();
+        return;
+      }
+      state.productResults = state.products
+        .filter(function (p) { return normalizeText(p.name).indexOf(q) !== -1; })
+        .slice(0, 12);
+      renderProductResults();
+      const exact = state.products.find(function (p) { return normalizeText(p.name) === q; });
+      $("product-warning").classList.toggle("hidden", Boolean(exact) || state.productResults.length > 0);
+    }
+
+    function renderProductResults() {
+      const list = $("product-results");
+      const input = $("product-input");
+      list.innerHTML = "";
+      const hasResults = state.productResults.length > 0;
+      list.classList.toggle("hidden", !hasResults);
+      input.setAttribute("aria-expanded", hasResults ? "true" : "false");
+      input.removeAttribute("aria-activedescendant");
+      if (!hasResults) return;
+      state.productResults.forEach(function (product, index) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.id = "product-option-" + index;
+        btn.className = "autocomplete-option w-full text-left px-3 py-2 border-b border-slate-100";
+        btn.setAttribute("role", "option");
+        btn.setAttribute("aria-selected", index === state.activeProductIndex ? "true" : "false");
+        btn.dataset.index = String(index);
+        btn.innerHTML = '<span class="font-semibold">' + esc(product.name) + '</span>' +
+          '<span class="block text-xs text-slate-500">' + esc(product.defaultUnit || "ลัง") + '</span>';
+        btn.addEventListener("mousedown", function (event) { event.preventDefault(); });
+        btn.addEventListener("click", function () { chooseProduct(index); });
+        list.appendChild(btn);
+      });
+    }
+
+    function moveProductActive(delta) {
+      if (state.productResults.length === 0) return;
+      state.activeProductIndex = (state.activeProductIndex + delta + state.productResults.length) % state.productResults.length;
+      document.querySelectorAll(".autocomplete-option").forEach(function (node, index) {
+        const active = index === state.activeProductIndex;
+        node.setAttribute("aria-selected", active ? "true" : "false");
+      });
+      $("product-input").setAttribute("aria-activedescendant", "product-option-" + state.activeProductIndex);
+    }
+
+    function chooseProduct(index) {
+      const product = state.productResults[index];
+      if (!product) return;
+      state.selectedProduct = product;
+      $("product-input").value = product.name;
+      $("unit-input").value = product.defaultUnit || "ลัง";
+      state.productResults = [];
+      $("product-warning").classList.add("hidden");
+      renderProductResults();
+      $("qty-input").focus();
+    }
+
+    function addItem() {
+      const name = $("product-input").value.trim();
+      const qty = Number($("qty-input").value);
+      const unit = $("unit-input").value.trim();
+      $("product-input").setAttribute("aria-invalid", "false");
+      $("qty-input").setAttribute("aria-invalid", "false");
+      $("unit-input").setAttribute("aria-invalid", "false");
+      if (!name) {
+        $("product-input").setAttribute("aria-invalid", "true");
+        $("product-input").focus();
+        toast("กรุณาระบุสินค้า", "warning");
+        return;
+      }
+      if (!Number.isFinite(qty) || qty <= 0) {
+        $("qty-input").setAttribute("aria-invalid", "true");
+        $("qty-input").focus();
+        toast("จำนวนต้องมากกว่า 0", "warning");
+        return;
+      }
+      if (!unit) {
+        $("unit-input").setAttribute("aria-invalid", "true");
+        $("unit-input").focus();
+        toast("กรุณาระบุหน่วย", "warning");
+        return;
+      }
+      const exact = state.products.find(function (p) { return normalizeText(p.name) === normalizeText(name); });
+      state.items.push({
+        name: exact ? exact.name : name,
+        qty: qty,
+        unit: exact ? (exact.defaultUnit || unit) : unit,
+        isFreeText: !exact
+      });
+      $("product-input").value = "";
+      $("qty-input").value = "1";
+      $("unit-input").value = "ลัง";
+      state.selectedProduct = null;
+      state.productResults = [];
+      $("product-warning").classList.add("hidden");
+      renderProductResults();
+      renderItems();
+      renderPreview();
+      $("product-input").focus();
+    }
+
+    function removeItem(index) {
+      state.items.splice(index, 1);
+      renderItems();
+      renderPreview();
+    }
+
+    function renderItems() {
+      const list = $("item-list");
+      list.innerHTML = "";
+      $("item-count").textContent = String(state.items.length);
+      $("empty-items").classList.toggle("hidden", state.items.length > 0);
+      state.items.forEach(function (item, index) {
+        const li = document.createElement("li");
+        li.className = "panel p-3 flex items-start justify-between gap-3";
+        li.innerHTML = '<div class="min-w-0">' +
+          '<div class="font-bold break-words">' + esc(item.name) + '</div>' +
+          '<div class="text-sm text-slate-600">' + esc(item.qty) + ' ' + esc(item.unit) +
+          (item.isFreeText ? ' <span class="text-brand-orange font-semibold">ชื่อใหม่</span>' : '') +
+          '</div></div>' +
+          '<button type="button" class="btn min-h-9 h-9 w-9 border-slate-300 text-slate-600 bg-white shrink-0" aria-label="ลบ ' + esc(item.name) + '">' +
+          '<i data-lucide="x" class="w-4 h-4"></i></button>';
+        li.querySelector("button").addEventListener("click", function () { removeItem(index); });
+        list.appendChild(li);
+      });
+      refreshIcons();
+    }
+
+    function renderPreview() {
+      const info = BILL_TYPES[state.billType];
+      const header = $("line-card-header");
+      header.className = "px-4 py-3 font-bold " + info.header;
+      $("line-card-title").textContent = info.title;
+      const previewItems = $("line-preview-items");
+      if (state.items.length === 0) {
+        previewItems.innerHTML = '<li class="text-slate-400 italic">ยังไม่มีรายการ</li>';
+      } else {
+        previewItems.innerHTML = state.items.map(function (item) {
+          return '<li class="break-words">- ' + esc(item.name) + ' ' + esc(item.qty) + ' ' + esc(item.unit) + '</li>';
+        }).join("");
+      }
+      const staff = $("staff-select").value;
+      $("line-preview-staff").textContent = staff ? "@" + staff : "-";
+      $("line-preview-meta").textContent = "บิลใหม่ · " + formatThaiDateTime(new Date());
+      $("preview-status").textContent = "รอจัด";
+      $("preview-status").className = "text-xs font-bold rounded-full px-2.5 py-1 bg-slate-100 text-slate-600";
+      refreshIcons();
+    }
+
+    function validateSubmit() {
+      if (state.items.length === 0) {
+        toast("ยังไม่มีรายการสินค้า", "warning");
+        $("product-input").focus();
+        return false;
+      }
+      if (!$("staff-select").value) {
+        toast("กรุณาเลือกพนักงาน", "warning");
+        $("staff-select").focus();
+        return false;
+      }
+      return true;
+    }
+
+    async function submitRequisition(event) {
+      event.preventDefault();
+      if (state.isSubmitting || !validateSubmit()) return;
+      state.isSubmitting = true;
+      $("submit-btn").disabled = true;
+      $("form-status").textContent = "กำลังส่งเข้า LINE...";
+      try {
+        const result = await apiCall("saveRequisition", {
+          billType: state.billType,
+          assignee: $("staff-select").value,
+          items: state.items
+        });
+        if (result.requisition) state.requisitions.unshift(result.requisition);
+        toast(result.preview ? "บันทึกตัวอย่างแล้ว" : "ส่งเข้า LINE และบันทึกแล้ว", "success");
+        resetForm();
+        renderHistory();
+      } catch (e) {
+        toast(e.message, "error");
+        $("form-status").textContent = "ส่งไม่สำเร็จ";
+      } finally {
+        state.isSubmitting = false;
+        $("submit-btn").disabled = false;
+      }
+    }
+
+    function resetForm() {
+      state.items = [];
+      $("staff-select").value = "";
+      $("product-input").value = "";
+      $("qty-input").value = "1";
+      $("unit-input").value = "ลัง";
+      $("form-status").textContent = "พร้อมทำรายการ";
+      renderItems();
+      renderPreview();
+    }
+
+    function statusMeta(status) {
+      if (status === "done") return { text: "จัดเสร็จ", cls: "bg-green-100 text-green-800", icon: "check-circle" };
+      if (status === "problem") return { text: "มีปัญหา", cls: "bg-amber-100 text-amber-800", icon: "triangle-alert" };
+      return { text: "รอจัด", cls: "bg-slate-100 text-slate-700", icon: "clock" };
+    }
+
+    function billBadge(type) {
+      const meta = BILL_TYPES[type] || BILL_TYPES["บิลจัด"];
+      return '<span class="rounded-full px-2.5 py-1 text-xs font-bold ' + meta.badge + '">' + esc(type) + '</span>';
+    }
+
+    function renderHistory() {
+      const q = normalizeText($("history-search").value);
+      const date = $("history-date").value;
+      const type = $("history-type").value;
+      const rows = state.requisitions.filter(function (req) {
+        const items = req.items || [];
+        const text = normalizeText([req.uid, req.billType, req.assignee, items.map(function (it) { return it.name; }).join(" ")].join(" "));
+        const reqDate = inputDate(req.timestamp);
+        return (!q || text.indexOf(q) !== -1) &&
+          (!date || reqDate === date) &&
+          (!type || req.billType === type);
+      });
+      const list = $("history-list");
+      list.innerHTML = "";
+      $("history-empty").classList.toggle("hidden", rows.length > 0);
+      rows.forEach(function (req) {
+        const meta = statusMeta(req.lineStatus);
+        const items = req.items || [];
+        const itemText = items.map(function (it) { return it.name + " " + it.qty + " " + it.unit; }).join(", ");
+        const node = document.createElement("article");
+        node.className = "panel p-4";
+        node.innerHTML =
+          '<div class="flex items-start justify-between gap-3">' +
+            '<div class="min-w-0">' +
+              '<div class="flex flex-wrap items-center gap-2">' + billBadge(req.billType) +
+                '<span class="text-sm text-slate-500">#' + esc(req.uid || "-") + '</span>' +
+              '</div>' +
+              '<div class="text-sm text-slate-500 mt-1">' + esc(formatThaiDateTime(req.timestamp)) + '</div>' +
+            '</div>' +
+            '<span class="rounded-full px-2.5 py-1 text-xs font-bold shrink-0 ' + meta.cls + '">' + esc(meta.text) + '</span>' +
+          '</div>' +
+          '<p class="mt-3 text-slate-700 break-words">' + esc(itemText || "-") + '</p>' +
+          '<p class="mt-2 text-sm text-slate-500">มอบให้ @' + esc(req.assignee || "-") +
+            (req.doneBy ? ' · โดย ' + esc(req.doneBy) + ' ' + esc(formatThaiTime(req.doneAt)) : '') +
+          '</p>';
+        list.appendChild(node);
+      });
+    }
+
+    function inputDate(value) {
+      const d = value ? new Date(value) : null;
+      if (!d || Number.isNaN(d.getTime())) return "";
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, "0");
+      const day = String(d.getDate()).padStart(2, "0");
+      return y + "-" + m + "-" + day;
+    }
+
+    function formatThaiDateTime(value) {
+      const d = value ? new Date(value) : new Date();
+      if (Number.isNaN(d.getTime())) return "-";
+      return d.toLocaleString("th-TH", {
+        day: "2-digit",
+        month: "short",
+        year: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit"
+      });
+    }
+
+    function formatThaiTime(value) {
+      const d = value ? new Date(value) : null;
+      if (!d || Number.isNaN(d.getTime())) return "";
+      return d.toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" });
+    }
+
+    function bindEvents() {
+      $("portal-btn").addEventListener("click", function () { window.location.href = APP_CONFIG.PORTAL_URL; });
+      $("refresh-btn").addEventListener("click", function () { loadInitialData(true); });
+      $("logout-btn").addEventListener("click", function () {
+        localStorage.removeItem(APP_CONFIG.STORAGE_KEY);
+        window.location.href = APP_CONFIG.PORTAL_URL;
+      });
+      $("tab-new").addEventListener("click", function () { setTab("new"); });
+      $("tab-history").addEventListener("click", function () { setTab("history"); });
+      document.querySelectorAll(".bill-type-btn").forEach(function (btn) {
+        btn.addEventListener("click", function () { setBillType(btn.dataset.type); });
+      });
+      $("product-input").addEventListener("input", searchProducts);
+      $("product-input").addEventListener("focus", searchProducts);
+      $("product-input").addEventListener("keydown", function (event) {
+        if (event.key === "ArrowDown") { event.preventDefault(); moveProductActive(1); }
+        if (event.key === "ArrowUp") { event.preventDefault(); moveProductActive(-1); }
+        if (event.key === "Enter" && state.activeProductIndex >= 0) {
+          event.preventDefault();
+          chooseProduct(state.activeProductIndex);
+        }
+        if (event.key === "Escape") {
+          state.productResults = [];
+          renderProductResults();
+        }
+      });
+      document.addEventListener("click", function (event) {
+        if (!$("product-results").contains(event.target) && event.target !== $("product-input")) {
+          state.productResults = [];
+          renderProductResults();
+        }
+      });
+      $("add-item-btn").addEventListener("click", addItem);
+      $("staff-select").addEventListener("change", renderPreview);
+      $("requisition-form").addEventListener("submit", submitRequisition);
+      $("history-search").addEventListener("input", renderHistory);
+      $("history-date").addEventListener("change", renderHistory);
+      $("history-type").addEventListener("change", renderHistory);
+    }
+
+    async function boot() {
+      const versionOk = await checkAppVersion();
+      if (!versionOk) return;
+      AppVersionGuard.start({ current: CURRENT_VERSION, readActions: ["getInitialData"] });
+      bindEvents();
+      setBillType("บิลจัด");
+      renderItems();
+      renderPreview();
+      showLoading();
+      try {
+        if (isPreviewEnv()) {
+          state.session = {
+            token: "preview",
+            id: "preview",
+            name: "พนักงานคลังสินค้า (Preview)",
+            roles: ["ADMIN"],
+            perms: { "app-pick": ["createRequisition"] }
+          };
+          showApp();
+          await loadInitialData();
+          return;
+        }
+        const params = new URLSearchParams(window.location.search);
+        const ssoToken = params.get("sso");
+        if (ssoToken) {
+          const fixedToken = ssoToken.replace(/ /g, "+");
+          state.session = await verifySsoToken(fixedToken);
+          if (!hasPickAccess(state.session)) throw new Error("permission_denied");
+          localStorage.setItem(APP_CONFIG.STORAGE_KEY, JSON.stringify(state.session));
+          params.delete("sso");
+          const url = new URL(window.location.href);
+          url.search = params.toString();
+          window.history.replaceState({}, document.title, url.toString());
+        } else {
+          const saved = localStorage.getItem(APP_CONFIG.STORAGE_KEY);
+          if (!saved) throw new Error("no_session");
+          const parsed = JSON.parse(saved);
+          state.session = await verifySsoToken(parsed.token);
+          if (!hasPickAccess(state.session)) throw new Error("permission_denied");
+          localStorage.setItem(APP_CONFIG.STORAGE_KEY, JSON.stringify(state.session));
+        }
+        showApp();
+        await loadInitialData();
+      } catch (e) {
+        localStorage.removeItem(APP_CONFIG.STORAGE_KEY);
+        const message = e.message === "permission_denied" ? "คุณไม่มีสิทธิ์เข้าใช้งานแอปนี้" : "กรุณาเข้าสู่ระบบผ่าน Portal อีกครั้ง";
+        showError(message);
+      }
+    }
+
+    document.addEventListener("DOMContentLoaded", boot);
+  </script>
+</body>
+</html>
