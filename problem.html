@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>แจ้งปัญหา · เบิกสินค้า AKRA</title>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{--blue:#171C8F;--orange:#E35205;--green:#16a34a;--red:#DC2626;--ink:#172033;--muted:#64748b;--line:#e2e8f0;}
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:'Sarabun',system-ui,sans-serif;background:#eef2f7;color:var(--ink);min-height:100vh;}
+  .wrap{max-width:480px;margin:0 auto;background:#fff;min-height:100vh;}
+  header{background:var(--blue);color:#fff;padding:16px;}
+  header h1{font-size:17px;display:flex;align-items:center;gap:8px;}
+  header .bill{margin-top:6px;font-size:12px;opacity:.9;display:flex;flex-wrap:wrap;gap:4px 12px;}
+  .body{padding:16px;}
+  .hint{background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;font-size:12.5px;border-radius:10px;padding:10px 12px;margin-bottom:14px;line-height:1.5;}
+  .item{border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:12px;transition:.15s;}
+  .item.short{border-color:#fca5a5;background:#fff7f7;}
+  .item .top{display:flex;align-items:flex-start;gap:10px;}
+  .item .nm{font-weight:700;font-size:15px;flex:1;}
+  .item .req{font-size:12px;color:var(--muted);margin-top:2px;}
+  .qbox{display:flex;align-items:center;gap:8px;margin-top:10px;}
+  .qbox label{font-size:13px;color:#475569;font-weight:600;}
+  .stepper{display:flex;align-items:center;border:1px solid #cbd5e1;border-radius:9px;overflow:hidden;}
+  .stepper button{width:38px;height:40px;border:0;background:#f1f5f9;font-size:19px;color:var(--blue);font-weight:700;}
+  .stepper button:active{background:#e2e8f0;}
+  .stepper input{width:56px;height:40px;border:0;text-align:center;font-family:inherit;font-size:15px;font-weight:700;}
+  .unit{font-size:13px;color:#475569;}
+  .badge{margin-left:auto;font-size:12px;font-weight:700;padding:4px 10px;border-radius:999px;}
+  .badge.ok{background:#dcfce7;color:#166534;}
+  .badge.lack{background:#fee2e2;color:#991b1b;}
+  .note{margin-top:10px;display:none;}
+  .item.short .note{display:block;}
+  .note .nl{font-size:12px;color:var(--muted);margin-bottom:4px;display:block;}
+  .note textarea{width:100%;border:1px solid #cbd5e1;border-radius:9px;padding:9px;font-family:inherit;font-size:13px;resize:none;}
+  .summary{background:#f8fafc;border:1px solid var(--line);border-radius:12px;padding:12px;margin:4px 0 14px;font-size:13px;}
+  .summary .srow{display:flex;justify-content:space-between;padding:3px 0;gap:10px;}
+  .summary .srow b{color:var(--red);text-align:right;}
+  .summary .allok{color:var(--green);font-weight:700;text-align:center;}
+  .reporter{font-size:12.5px;color:var(--muted);margin-bottom:14px;}
+  .reporter b{color:var(--ink);}
+  .submit{width:100%;background:var(--orange);color:#fff;border:0;border-radius:11px;padding:14px;font-weight:700;font-size:15px;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px;}
+  .submit:active{background:#c2410c;}
+  .submit:disabled{opacity:.5;}
+  .center{text-align:center;padding:48px 20px;color:var(--muted);}
+  .spin{width:42px;height:42px;border:4px solid #e2e8f0;border-top-color:var(--blue);border-radius:50%;animation:sp 1s linear infinite;margin:0 auto 14px;}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .ic{width:64px;height:64px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:34px;margin:0 auto 14px;}
+  .ic.ok{background:#dcfce7;color:var(--green);}
+  .ic.err{background:#fee2e2;color:var(--red);}
+  .center h2{font-size:18px;margin-bottom:6px;color:var(--ink);}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div id="loading" class="center"><div class="spin"></div>กำลังโหลดบิล…</div>
+
+  <div id="form" style="display:none">
+    <header>
+      <h1>⚠️ แจ้งปัญหาการเบิก</h1>
+      <div class="bill" id="bill-meta"></div>
+    </header>
+    <div class="body">
+      <div class="hint">ใส่ <b>จำนวนที่จัดได้จริง</b> ของแต่ละรายการ. ถ้าได้ไม่ครบ ระบบจะให้ใส่หมายเหตุ.</div>
+      <div id="items"></div>
+      <div class="summary" id="summary"></div>
+      <div class="reporter">ผู้แจ้ง: <b id="reporter">-</b></div>
+      <button class="submit" id="submit">📤 บันทึก &amp; แจ้งกลุ่ม</button>
+    </div>
+  </div>
+
+  <div id="done" class="center" style="display:none">
+    <div class="ic ok">✓</div>
+    <h2>ส่งแล้ว</h2>
+    <p>บันทึกจำนวนจริงลงระบบ และแจ้งกลุ่ม LINE เรียบร้อย</p>
+    <p style="margin-top:10px;font-size:12px;color:#94a3b8">ปิดหน้านี้ได้เลย</p>
+  </div>
+
+  <div id="error" class="center" style="display:none">
+    <div class="ic err">!</div>
+    <h2>เกิดข้อผิดพลาด</h2>
+    <p id="error-msg">ไม่สามารถโหลดบิลได้</p>
+  </div>
+</div>
+
+<script>
+  const API_URL = "https://script.google.com/macros/s/AKfycbzChvW0QxMVRQTG2vvJIhPKCbRKQfcas_n58dGlYJaRp-b6mqdt9ebKAHtEx9HO48w/exec";
+  const params = new URLSearchParams(location.search);
+  const UID = params.get("uid") || "";
+  const TOKEN = (params.get("token") || "").replace(/ /g, "+");
+  let ITEMS = [];
+
+  const $ = id => document.getElementById(id);
+  function show(which){ ["loading","form","done","error"].forEach(s => $(s).style.display = s===which ? (s==="form"?"block":"block") : "none"); }
+  function fail(msg){ $("error-msg").textContent = msg || "เกิดข้อผิดพลาด"; show("error"); }
+
+  async function load(){
+    if(!UID || !TOKEN){ return fail("ลิงก์ไม่ถูกต้อง (ไม่มี uid/token)"); }
+    try{
+      const res = await fetch(API_URL + "?action=getBill&uid=" + encodeURIComponent(UID) + "&token=" + encodeURIComponent(TOKEN));
+      const data = await res.json();
+      if(!data.success){ return fail(data.message || "ไม่พบบิล"); }
+      render(data.bill);
+    }catch(e){ fail("เชื่อมต่อเซิร์ฟเวอร์ไม่ได้"); }
+  }
+
+  function render(bill){
+    ITEMS = bill.items || [];
+    $("bill-meta").innerHTML =
+      '<span>' + (bill.billType||"") + '</span><span>· มอบให้ @' + (bill.assignee||"-") + '</span>';
+    $("reporter").textContent = bill.assignee || "-";
+    // merge any previous problem report
+    const prev = {};
+    (bill.problemItems||[]).forEach(p => prev[String(p.name).trim()] = p);
+
+    const wrap = $("items");
+    wrap.innerHTML = "";
+    ITEMS.forEach((it, i) => {
+      const p = prev[String(it.name).trim()] || {};
+      const startQty = (p.actualQty != null) ? p.actualQty : it.qty;
+      const note = p.note || "";
+      const el = document.createElement("div");
+      el.className = "item";
+      el.dataset.i = i;
+      el.innerHTML =
+        '<div class="top"><div><div class="nm"></div><div class="req">เบิก ' + it.qty + ' ' + esc(it.unit) + '</div></div>'+
+        '<span class="badge ok" data-badge>ครบ ✓</span></div>'+
+        '<div class="qbox"><label>ได้จริง</label>'+
+        '<div class="stepper"><button type="button" data-d="-1">−</button>'+
+        '<input type="number" min="0" data-q value="'+ startQty +'"><button type="button" data-d="1">+</button></div>'+
+        '<span class="unit">'+ esc(it.unit) +'</span></div>'+
+        '<div class="note"><span class="nl">หมายเหตุ (ทำไมไม่ครบ)</span>'+
+        '<textarea rows="2" data-note placeholder="เช่น ของเหลือไม่พอ รอเข้าใหม่">'+ esc(note) +'</textarea></div>';
+      el.querySelector(".nm").textContent = it.name;
+      wrap.appendChild(el);
+    });
+    refresh();
+    show("form");
+  }
+
+  function esc(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+
+  function refresh(){
+    let short = [];
+    document.querySelectorAll(".item").forEach(el=>{
+      const i=+el.dataset.i, it=ITEMS[i];
+      const q=Math.max(0,+el.querySelector("[data-q]").value||0);
+      const badge=el.querySelector("[data-badge]");
+      if(q < it.qty){
+        el.classList.add("short");
+        badge.className="badge lack"; badge.textContent="ขาด "+(it.qty-q);
+        short.push({name:it.name,unit:it.unit,req:it.qty,got:q});
+      }else{
+        el.classList.remove("short");
+        badge.className="badge ok"; badge.textContent="ครบ ✓";
+      }
+    });
+    const s=$("summary");
+    if(short.length===0){
+      s.innerHTML='<div class="allok">✓ ครบทุกรายการ — กดบันทึกเพื่อแจ้งสถานะ</div>';
+    }else{
+      s.innerHTML='<div style="font-weight:700;margin-bottom:6px">สรุปของขาด '+short.length+' รายการ</div>'+
+        short.map(x=>'<div class="srow"><span>'+esc(x.name)+'</span><b>'+x.got+'/'+x.req+' '+esc(x.unit)+' (ขาด '+(x.req-x.got)+')</b></div>').join("");
+    }
+  }
+
+  document.addEventListener("input", e=>{ if(e.target.matches("[data-q]")) refresh(); });
+  document.addEventListener("click", e=>{
+    const b=e.target.closest("[data-d]"); if(!b) return;
+    const inp=b.parentElement.querySelector("[data-q]");
+    inp.value=Math.max(0,(+inp.value||0)+(+b.dataset.d));
+    refresh();
+  });
+
+  $("submit").addEventListener("click", async ()=>{
+    const btn=$("submit"); btn.disabled=true; btn.textContent="กำลังบันทึก…";
+    const items=[...document.querySelectorAll(".item")].map(el=>{
+      const i=+el.dataset.i, it=ITEMS[i];
+      return {
+        name: it.name,
+        unit: it.unit,
+        actualQty: Math.max(0,+el.querySelector("[data-q]").value||0),
+        note: (el.querySelector("[data-note]").value||"").trim()
+      };
+    });
+    try{
+      const res=await fetch(API_URL,{
+        method:"POST",
+        headers:{"Content-Type":"text/plain;charset=utf-8"},
+        body:JSON.stringify({action:"reportProblem", uid:UID, token:TOKEN, items:items})
+      });
+      const data=await res.json();
+      if(!data.success){ throw new Error(data.message||"บันทึกไม่สำเร็จ"); }
+      show("done");
+    }catch(e){
+      btn.disabled=false; btn.textContent="📤 บันทึก & แจ้งกลุ่ม";
+      alert(e.message||"บันทึกไม่สำเร็จ");
+    }
+  });
+
+  load();
+</script>
+</body>
+</html>
