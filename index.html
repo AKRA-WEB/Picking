@@ -260,42 +260,24 @@
               </div>
             </fieldset>
 
-            <div class="grid md:grid-cols-[minmax(0,1fr)_7rem_8rem] gap-3 items-end">
-              <div class="relative">
-                <label for="product-input" class="text-sm font-bold text-slate-700">สินค้า</label>
-                <input id="product-input" class="input mt-1" type="text" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="product-results" aria-autocomplete="list" placeholder="พิมพ์ชื่อสินค้า" required>
-                <div id="product-results" class="autocomplete-list hidden" role="listbox"></div>
-                <p id="product-warning" class="hidden mt-1 text-sm text-brand-orange" aria-live="polite">ไม่พบในรายการสินค้า จะเพิ่มเป็นชื่อใหม่</p>
-              </div>
-              <div>
-                <label for="qty-input" class="text-sm font-bold text-slate-700">จำนวน</label>
-                <input id="qty-input" class="input mt-1 text-center" type="number" min="1" step="1" inputmode="numeric" value="1" required>
-              </div>
-              <div>
-                <label for="unit-input" class="text-sm font-bold text-slate-700">หน่วย</label>
-                <input id="unit-input" class="input mt-1" type="text" list="unit-options" value="ลัง" required>
-                <datalist id="unit-options">
-                  <option value="ลัง"></option>
-                  <option value="แพ็ค"></option>
-                  <option value="ชิ้น"></option>
-                  <option value="ถุง"></option>
-                  <option value="กล่อง"></option>
-                </datalist>
-              </div>
-            </div>
-
-            <button id="add-item-btn" type="button" class="btn w-full bg-brand-blue text-white hover:bg-[#11146B]">
-              <i data-lucide="plus" class="w-5 h-5"></i>
-              เพิ่มรายการ
-            </button>
-
             <div>
               <div class="flex items-center justify-between gap-3 mb-2">
                 <h3 class="font-bold">รายการในบิล</h3>
                 <span class="text-sm text-slate-500"><span id="item-count">0</span> รายการ</span>
               </div>
-              <ul id="item-list" class="space-y-2"></ul>
-              <p id="empty-items" class="panel border-dashed text-center text-slate-500 p-4">ยังไม่มีรายการ</p>
+              <ul id="item-rows" class="space-y-2"></ul>
+              <p id="empty-items" class="panel border-dashed text-center text-slate-500 p-4">ยังไม่มีรายการ — กด “เพิ่มแถว”</p>
+              <button id="add-row-btn" type="button" class="btn w-full mt-2 bg-brand-blue text-white hover:bg-[#11146B]">
+                <i data-lucide="plus" class="w-5 h-5"></i>
+                เพิ่มแถว
+              </button>
+              <datalist id="unit-options">
+                <option value="ลัง"></option>
+                <option value="แพ็ค"></option>
+                <option value="ชิ้น"></option>
+                <option value="ถุง"></option>
+                <option value="กล่อง"></option>
+              </datalist>
             </div>
 
             <div>
@@ -387,7 +369,7 @@
   <div id="sr-status" class="visually-hidden" aria-live="polite"></div>
 
   <script>
-    const CURRENT_VERSION = "20260616.07";
+    const CURRENT_VERSION = "20260617.01";
     async function checkAppVersion() {
       try {
         const res = await fetch('version.json?t=' + Date.now());
@@ -575,10 +557,11 @@
       staff: [],
       requisitions: [],
       items: [],
+      _rowSeq: 0,
       billType: "บิลจัด",
-      selectedProduct: null,
       productResults: [],
       activeProductIndex: -1,
+      activeRowIndex: -1,
       activeTab: "new",
       isSubmitting: false
     };
@@ -604,6 +587,11 @@
 
     function normalizeText(value) {
       return String(value || "").trim().replace(/\s+/g, " ").toLowerCase();
+    }
+
+    function padBillNo(n) {
+      const x = Number(n);
+      return (!Number.isFinite(x) || x <= 0) ? "" : ("000" + Math.floor(x)).slice(-3);
     }
 
     function normalizeRoles(roles) {
@@ -728,7 +716,8 @@
           items: data.items,
           lineStatus: "pending",
           doneBy: "",
-          doneAt: ""
+          doneAt: "",
+          billNo: state.requisitions.filter(function (r) { return inputDate(r.timestamp) === inputDate(now); }).length + 1
         };
         return Promise.resolve({ success: true, requisition: req, preview: true });
       }
@@ -801,136 +790,216 @@
       renderPreview();
     }
 
-    function searchProducts() {
-      const q = normalizeText($("product-input").value);
-      state.selectedProduct = null;
-      state.activeProductIndex = -1;
-      if (!q) {
-        state.productResults = [];
-        renderProductResults();
-        return;
-      }
-      state.productResults = state.products
-        .filter(function (p) { return normalizeText(p.name).indexOf(q) !== -1; })
-        .slice(0, 12);
-      renderProductResults();
-      const exact = state.products.find(function (p) { return normalizeText(p.name) === q; });
-      $("product-warning").classList.toggle("hidden", Boolean(exact) || state.productResults.length > 0);
+    function nextRowId() {
+      state._rowSeq += 1;
+      return state._rowSeq;
     }
 
-    function renderProductResults() {
-      const list = $("product-results");
-      const input = $("product-input");
+    function blankRow() {
+      return { rowId: nextRowId(), name: "", qty: 1, unit: "ลัง", isFreeText: false };
+    }
+
+    function exactProductByName(name) {
+      const q = normalizeText(name);
+      if (!q) return null;
+      return state.products.find(function (p) { return normalizeText(p.name) === q; }) || null;
+    }
+
+    function validRow(item) {
+      return !!String(item.name || "").trim() && Number(item.qty) > 0 && !!String(item.unit || "").trim();
+    }
+
+    function blankItemRow(item) {
+      return !String(item.name || "").trim();
+    }
+
+    function countValidRows() {
+      return state.items.filter(validRow).length;
+    }
+
+    function updateItemCount() {
+      $("item-count").textContent = String(countValidRows());
+    }
+
+    function closeAllRowResults() {
+      state.productResults = [];
+      state.activeProductIndex = -1;
+      state.activeRowIndex = -1;
+      document.querySelectorAll(".row-results").forEach(function (list) {
+        list.classList.add("hidden");
+        list.innerHTML = "";
+      });
+      document.querySelectorAll(".row-name").forEach(function (input) {
+        input.setAttribute("aria-expanded", "false");
+        input.removeAttribute("aria-activedescendant");
+      });
+    }
+
+    function setRowWarning(li, index) {
+      const item = state.items[index];
+      const warn = li.querySelector(".row-warn");
+      const q = String(item.name || "").trim();
+      const freeText = !!q && !exactProductByName(q);
+      item.isFreeText = freeText;
+      warn.classList.toggle("hidden", !freeText);
+    }
+
+    function searchRowProducts(index, value, li) {
+      const item = state.items[index];
+      if (!item) return;
+      item.name = value;
+      state.activeRowIndex = index;
+      state.activeProductIndex = -1;
+      const q = normalizeText(value);
+      state.productResults = q
+        ? state.products.filter(function (p) { return normalizeText(p.name).indexOf(q) !== -1; }).slice(0, 12)
+        : [];
+      renderRowResults(li, index);
+      setRowWarning(li, index);
+      updateItemCount();
+      renderPreview();
+    }
+
+    function renderRowResults(li, index) {
+      const list = li.querySelector(".row-results");
+      const input = li.querySelector(".row-name");
       list.innerHTML = "";
-      const hasResults = state.productResults.length > 0;
+      const hasResults = state.activeRowIndex === index && state.productResults.length > 0;
       list.classList.toggle("hidden", !hasResults);
       input.setAttribute("aria-expanded", hasResults ? "true" : "false");
       input.removeAttribute("aria-activedescendant");
       if (!hasResults) return;
-      state.productResults.forEach(function (product, index) {
+      state.productResults.forEach(function (product, resultIndex) {
         const btn = document.createElement("button");
         btn.type = "button";
-        btn.id = "product-option-" + index;
+        btn.id = "row-" + state.items[index].rowId + "-option-" + resultIndex;
         btn.className = "autocomplete-option w-full text-left px-3 py-2 border-b border-slate-100";
         btn.setAttribute("role", "option");
-        btn.setAttribute("aria-selected", index === state.activeProductIndex ? "true" : "false");
-        btn.dataset.index = String(index);
+        btn.setAttribute("aria-selected", resultIndex === state.activeProductIndex ? "true" : "false");
         btn.innerHTML = '<span class="font-semibold">' + esc(product.name) + '</span>' +
           '<span class="block text-xs text-slate-500">' + esc(product.defaultUnit || "ลัง") + '</span>';
         btn.addEventListener("mousedown", function (event) { event.preventDefault(); });
-        btn.addEventListener("click", function () { chooseProduct(index); });
+        btn.addEventListener("click", function () { chooseRowProduct(index, resultIndex, li); });
         list.appendChild(btn);
       });
     }
 
-    function moveProductActive(delta) {
-      if (state.productResults.length === 0) return;
+    function moveProductActive(delta, index, li) {
+      if (state.activeRowIndex !== index || state.productResults.length === 0) return;
       state.activeProductIndex = (state.activeProductIndex + delta + state.productResults.length) % state.productResults.length;
-      document.querySelectorAll(".autocomplete-option").forEach(function (node, index) {
-        const active = index === state.activeProductIndex;
+      li.querySelectorAll(".autocomplete-option").forEach(function (node, resultIndex) {
+        const active = resultIndex === state.activeProductIndex;
         node.setAttribute("aria-selected", active ? "true" : "false");
       });
-      $("product-input").setAttribute("aria-activedescendant", "product-option-" + state.activeProductIndex);
+      li.querySelector(".row-name").setAttribute("aria-activedescendant", "row-" + state.items[index].rowId + "-option-" + state.activeProductIndex);
     }
 
-    function chooseProduct(index) {
-      const product = state.productResults[index];
-      if (!product) return;
-      state.selectedProduct = product;
-      $("product-input").value = product.name;
-      $("unit-input").value = product.defaultUnit || "ลัง";
-      state.productResults = [];
-      $("product-warning").classList.add("hidden");
-      renderProductResults();
-      $("qty-input").focus();
+    function chooseRowProduct(index, resultIndex, li) {
+      const product = state.productResults[resultIndex];
+      const item = state.items[index];
+      if (!product || !item) return;
+      item.name = product.name;
+      item.unit = product.defaultUnit || item.unit || "ลัง";
+      item.isFreeText = false;
+      li.querySelector(".row-name").value = item.name;
+      li.querySelector(".row-unit").value = item.unit;
+      li.querySelector(".row-warn").classList.add("hidden");
+      closeAllRowResults();
+      updateItemCount();
+      renderPreview();
+      li.querySelector(".row-qty").focus();
     }
 
-    function addItem() {
-      const name = $("product-input").value.trim();
-      const qty = Number($("qty-input").value);
-      const unit = $("unit-input").value.trim();
-      $("product-input").setAttribute("aria-invalid", "false");
-      $("qty-input").setAttribute("aria-invalid", "false");
-      $("unit-input").setAttribute("aria-invalid", "false");
-      if (!name) {
-        $("product-input").setAttribute("aria-invalid", "true");
-        $("product-input").focus();
-        toast("กรุณาระบุสินค้า", "warning");
-        return;
-      }
-      if (!Number.isFinite(qty) || qty <= 0) {
-        $("qty-input").setAttribute("aria-invalid", "true");
-        $("qty-input").focus();
-        toast("จำนวนต้องมากกว่า 0", "warning");
-        return;
-      }
-      if (!unit) {
-        $("unit-input").setAttribute("aria-invalid", "true");
-        $("unit-input").focus();
-        toast("กรุณาระบุหน่วย", "warning");
-        return;
-      }
-      const exact = state.products.find(function (p) { return normalizeText(p.name) === normalizeText(name); });
-      state.items.push({
-        name: exact ? exact.name : name,
-        qty: qty,
-        unit: exact ? (exact.defaultUnit || unit) : unit,
-        isFreeText: !exact
+    function wireRow(li, index) {
+      const item = state.items[index];
+      const nameInput = li.querySelector(".row-name");
+      const qtyInput = li.querySelector(".row-qty");
+      const unitInput = li.querySelector(".row-unit");
+      nameInput.addEventListener("input", function () {
+        searchRowProducts(index, nameInput.value, li);
       });
-      $("product-input").value = "";
-      $("qty-input").value = "1";
-      $("unit-input").value = "ลัง";
-      state.selectedProduct = null;
-      state.productResults = [];
-      $("product-warning").classList.add("hidden");
-      renderProductResults();
-      renderItems();
-      renderPreview();
-      $("product-input").focus();
+      nameInput.addEventListener("focus", function () {
+        searchRowProducts(index, nameInput.value, li);
+      });
+      nameInput.addEventListener("keydown", function (event) {
+        if (event.key === "ArrowDown") { event.preventDefault(); moveProductActive(1, index, li); }
+        if (event.key === "ArrowUp") { event.preventDefault(); moveProductActive(-1, index, li); }
+        if (event.key === "Enter" && state.activeRowIndex === index && state.activeProductIndex >= 0) {
+          event.preventDefault();
+          chooseRowProduct(index, state.activeProductIndex, li);
+        }
+        if (event.key === "Escape") closeAllRowResults();
+      });
+      qtyInput.addEventListener("input", function () {
+        item.qty = qtyInput.value;
+        updateItemCount();
+        renderPreview();
+      });
+      unitInput.addEventListener("input", function () {
+        item.unit = unitInput.value;
+        updateItemCount();
+        renderPreview();
+      });
+      li.querySelector(".row-remove").addEventListener("click", function () {
+        removeRow(index);
+      });
+      setRowWarning(li, index);
     }
 
-    function removeItem(index) {
+    function addRow(shouldFocus) {
+      state.items.push(blankRow());
+      renderItemRows();
+      renderPreview();
+      if (shouldFocus !== false) {
+        const inputs = document.querySelectorAll("#item-rows .row-name");
+        const last = inputs[inputs.length - 1];
+        if (last) last.focus();
+      }
+    }
+
+    function removeRow(index) {
       state.items.splice(index, 1);
-      renderItems();
+      closeAllRowResults();
+      renderItemRows();
       renderPreview();
     }
 
-    function renderItems() {
-      const list = $("item-list");
+    function renderItemRows() {
+      const list = $("item-rows");
       list.innerHTML = "";
-      $("item-count").textContent = String(state.items.length);
+      updateItemCount();
       $("empty-items").classList.toggle("hidden", state.items.length > 0);
       state.items.forEach(function (item, index) {
+        const rowId = item.rowId || nextRowId();
+        item.rowId = rowId;
         const li = document.createElement("li");
-        li.className = "panel p-3 flex items-start justify-between gap-3";
-        li.innerHTML = '<div class="min-w-0">' +
-          '<div class="font-bold break-words">' + esc(item.name) + '</div>' +
-          '<div class="text-sm text-slate-600">' + esc(item.qty) + ' ' + esc(item.unit) +
-          (item.isFreeText ? ' <span class="text-brand-orange font-semibold">ชื่อใหม่</span>' : '') +
-          '</div></div>' +
-          '<button type="button" class="btn min-h-9 h-9 w-9 border-slate-300 text-slate-600 bg-white shrink-0" aria-label="ลบ ' + esc(item.name) + '">' +
-          '<i data-lucide="x" class="w-4 h-4"></i></button>';
-        li.querySelector("button").addEventListener("click", function () { removeItem(index); });
+        li.className = "panel p-3";
+        li.dataset.index = String(index);
+        const nameId = "item-name-" + rowId;
+        const qtyId = "item-qty-" + rowId;
+        const unitId = "item-unit-" + rowId;
+        const resultsId = "item-results-" + rowId;
+        li.innerHTML =
+          '<div class="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_5rem_6rem_2.75rem] gap-2 items-end">' +
+            '<div class="relative">' +
+              '<label for="' + nameId + '" class="block text-[11px] font-bold text-slate-500 mb-1">สินค้า #' + (index + 1) + '</label>' +
+              '<input id="' + nameId + '" class="input row-name" type="text" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="' + resultsId + '" aria-autocomplete="list" value="' + esc(item.name) + '" placeholder="ค้นหาสินค้า...">' +
+              '<ul id="' + resultsId + '" class="row-results autocomplete-list hidden" role="listbox"></ul>' +
+              '<div class="row-warn hidden text-xs text-brand-orange font-semibold mt-1">ชื่อใหม่ (ไม่พบในรายการสินค้า)</div>' +
+            '</div>' +
+            '<div>' +
+              '<label for="' + qtyId + '" class="block text-[11px] font-bold text-slate-500 mb-1">จำนวน</label>' +
+              '<input id="' + qtyId + '" class="input row-qty text-center" type="number" min="1" step="1" inputmode="numeric" value="' + esc(item.qty) + '">' +
+            '</div>' +
+            '<div>' +
+              '<label for="' + unitId + '" class="block text-[11px] font-bold text-slate-500 mb-1">หน่วย</label>' +
+              '<input id="' + unitId + '" class="input row-unit" type="text" list="unit-options" value="' + esc(item.unit) + '">' +
+            '</div>' +
+            '<button type="button" class="row-remove btn h-11 w-11 border-slate-300 text-slate-600 bg-white" aria-label="ลบแถว ' + (index + 1) + '">' +
+              '<i data-lucide="x" class="w-4 h-4"></i>' +
+            '</button>' +
+          '</div>';
+        wireRow(li, index);
         list.appendChild(li);
       });
       refreshIcons();
@@ -940,13 +1009,17 @@
       const info = BILL_TYPES[state.billType];
       const header = $("line-card-header");
       header.className = "px-4 py-3 font-bold " + info.header;
-      $("line-card-title").textContent = info.title;
+      $("line-card-title").textContent = info.title + " #—";
       const previewItems = $("line-preview-items");
-      if (state.items.length === 0) {
+      const rows = state.items.filter(validRow);
+      if (rows.length === 0) {
         previewItems.innerHTML = '<li class="text-slate-400 italic">ยังไม่มีรายการ</li>';
       } else {
-        previewItems.innerHTML = state.items.map(function (item) {
-          return '<li class="break-words">- ' + esc(item.name) + ' ' + esc(item.qty) + ' ' + esc(item.unit) + '</li>';
+        previewItems.innerHTML = rows.map(function (item, index) {
+          return '<li class="flex justify-between gap-2">' +
+            '<span class="break-words">' + (index + 1) + '. ' + esc(item.name) + '</span>' +
+            '<span class="font-bold whitespace-nowrap">' + esc(item.qty) + ' ' + esc(item.unit) + '</span>' +
+          '</li>';
         }).join("");
       }
       const staff = $("staff-select").value;
@@ -957,10 +1030,75 @@
       refreshIcons();
     }
 
-    function validateSubmit() {
-      if (state.items.length === 0) {
+    function focusFirstRowName() {
+      let input = document.querySelector("#item-rows .row-name");
+      if (!input) {
+        addRow(false);
+        input = document.querySelector("#item-rows .row-name");
+      }
+      if (input) input.focus();
+    }
+
+    function collectSubmitItems() {
+      document.querySelectorAll("#item-rows .row-name, #item-rows .row-qty, #item-rows .row-unit").forEach(function (input) {
+        input.setAttribute("aria-invalid", "false");
+      });
+      const prepared = [];
+      let firstInvalid = null;
+      state.items.forEach(function (item, index) {
+        const li = document.querySelector('#item-rows li[data-index="' + index + '"]');
+        const nameInput = li && li.querySelector(".row-name");
+        const qtyInput = li && li.querySelector(".row-qty");
+        const unitInput = li && li.querySelector(".row-unit");
+        const name = String(item.name || "").trim();
+        const unit = String(item.unit || "").trim();
+        const qty = Number(item.qty);
+        if (blankItemRow(item)) return;
+        if (!name) {
+          if (nameInput) nameInput.setAttribute("aria-invalid", "true");
+          firstInvalid = firstInvalid || nameInput;
+          return;
+        }
+        if (!Number.isFinite(qty) || qty <= 0) {
+          if (qtyInput) qtyInput.setAttribute("aria-invalid", "true");
+          firstInvalid = firstInvalid || qtyInput;
+          return;
+        }
+        if (!unit) {
+          if (unitInput) unitInput.setAttribute("aria-invalid", "true");
+          firstInvalid = firstInvalid || unitInput;
+          return;
+        }
+        const exact = exactProductByName(name);
+        if (exact) {
+          item.name = exact.name;
+          item.unit = exact.defaultUnit || unit;
+          item.isFreeText = false;
+        } else {
+          item.name = name;
+          item.unit = unit;
+          item.isFreeText = true;
+        }
+        item.qty = qty;
+        prepared.push({
+          name: item.name,
+          qty: qty,
+          unit: item.unit,
+          isFreeText: item.isFreeText
+        });
+      });
+      if (firstInvalid) {
+        firstInvalid.focus();
+        toast("กรุณากรอกข้อมูลในแถวสินค้าให้ครบ", "warning");
+        return null;
+      }
+      return prepared;
+    }
+
+    function validateSubmit(items) {
+      if (items.length === 0) {
         toast("ยังไม่มีรายการสินค้า", "warning");
-        $("product-input").focus();
+        focusFirstRowName();
         return false;
       }
       if (!$("staff-select").value) {
@@ -974,13 +1112,8 @@
     async function submitRequisition(event) {
       event.preventDefault();
       if (state.isSubmitting) return;
-      // auto-add a product that was selected/typed but not yet added to the list
-      if ($("product-input").value.trim()) {
-        const before = state.items.length;
-        addItem();
-        if (state.items.length === before) return; // addItem failed (toast already shown)
-      }
-      if (!validateSubmit()) return;
+      const submitItems = collectSubmitItems();
+      if (!submitItems || !validateSubmit(submitItems)) return;
       state.isSubmitting = true;
       $("submit-btn").disabled = true;
       $("form-status").textContent = "กำลังส่งเข้า LINE...";
@@ -988,7 +1121,7 @@
         const result = await apiCall("saveRequisition", {
           billType: state.billType,
           assignee: $("staff-select").value,
-          items: state.items
+          items: submitItems
         });
         if (result.requisition) state.requisitions.unshift(result.requisition);
         toast(result.preview ? "บันทึกตัวอย่างแล้ว" : "ส่งเข้า LINE และบันทึกแล้ว", "success");
@@ -1006,11 +1139,8 @@
     function resetForm() {
       state.items = [];
       $("staff-select").value = "";
-      $("product-input").value = "";
-      $("qty-input").value = "1";
-      $("unit-input").value = "ลัง";
       $("form-status").textContent = "พร้อมทำรายการ";
-      renderItems();
+      addRow(false);
       renderPreview();
     }
 
@@ -1051,7 +1181,7 @@
           '<div class="flex items-start justify-between gap-3">' +
             '<div class="min-w-0">' +
               '<div class="flex flex-wrap items-center gap-2">' + billBadge(req.billType) +
-                '<span class="text-sm text-slate-500">#' + esc(req.uid || "-") + '</span>' +
+                '<span class="text-sm text-slate-500">#' + esc(req.uid || "-") + (req.billNo ? ' · #' + padBillNo(req.billNo) : '') + '</span>' +
               '</div>' +
               '<div class="text-sm text-slate-500 mt-1">' + esc(formatThaiDateTime(req.timestamp)) + '</div>' +
             '</div>' +
@@ -1104,27 +1234,12 @@
       document.querySelectorAll(".bill-type-btn").forEach(function (btn) {
         btn.addEventListener("click", function () { setBillType(btn.dataset.type); });
       });
-      $("product-input").addEventListener("input", searchProducts);
-      $("product-input").addEventListener("focus", searchProducts);
-      $("product-input").addEventListener("keydown", function (event) {
-        if (event.key === "ArrowDown") { event.preventDefault(); moveProductActive(1); }
-        if (event.key === "ArrowUp") { event.preventDefault(); moveProductActive(-1); }
-        if (event.key === "Enter" && state.activeProductIndex >= 0) {
-          event.preventDefault();
-          chooseProduct(state.activeProductIndex);
-        }
-        if (event.key === "Escape") {
-          state.productResults = [];
-          renderProductResults();
-        }
-      });
       document.addEventListener("click", function (event) {
-        if (!$("product-results").contains(event.target) && event.target !== $("product-input")) {
-          state.productResults = [];
-          renderProductResults();
+        if (!event.target.closest("#item-rows")) {
+          closeAllRowResults();
         }
       });
-      $("add-item-btn").addEventListener("click", addItem);
+      $("add-row-btn").addEventListener("click", function () { addRow(true); });
       $("staff-select").addEventListener("change", renderPreview);
       $("requisition-form").addEventListener("submit", submitRequisition);
       $("history-search").addEventListener("input", renderHistory);
@@ -1138,7 +1253,8 @@
       AppVersionGuard.start({ current: CURRENT_VERSION, readActions: ["getInitialData"] });
       bindEvents();
       setBillType("บิลจัด");
-      renderItems();
+      if (state.items.length === 0) addRow(false);
+      else renderItemRows();
       renderPreview();
       showLoading();
       try {

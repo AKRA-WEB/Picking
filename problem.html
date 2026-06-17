@@ -101,7 +101,7 @@
     return h === "" || h === "localhost" || h === "127.0.0.1" || h === "::1";
   }
   const SAMPLE_BILL = {
-    billType: "บิลจัด", assignee: "หมวย", requester: "สมชาย", lineStatus: "pending",
+    billType: "บิลจัด", assignee: "หมวย", requester: "สมชาย", lineStatus: "pending", billNo: 1,
     items: [
       { name: "นมข้นหวาน", qty: 5, unit: "ลัง" },
       { name: "ผงวุ้น", qty: 3, unit: "ถุง" },
@@ -124,7 +124,8 @@
   function render(bill){
     ITEMS = bill.items || [];
     $("bill-meta").innerHTML =
-      '<span>' + esc(bill.billType||"") + '</span><span>· มอบให้ @' + esc(bill.assignee||"-") + '</span>';
+      '<span>' + esc(bill.billType||"") + (bill.billNo ? ' #' + padBillNo(bill.billNo) : '') + '</span>' +
+      '<span>· มอบให้ @' + esc(bill.assignee||"-") + '</span>';
     $("reporter").textContent = bill.assignee || "-";
     // merge any previous problem report
     const prev = {};
@@ -156,6 +157,7 @@
   }
 
   function esc(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+  function padBillNo(n){ const x=Number(n); return (!Number.isFinite(x)||x<=0) ? "" : ("000"+Math.floor(x)).slice(-3); }
 
   function refresh(){
     let short = [];
