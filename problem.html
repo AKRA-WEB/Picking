@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="referrer" content="no-referrer">
 <title>แจ้งปัญหา · เบิกสินค้า AKRA</title>
 <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -95,7 +96,22 @@
   function show(which){ ["loading","form","done","error"].forEach(s => $(s).style.display = s===which ? (s==="form"?"block":"block") : "none"); }
   function fail(msg){ $("error-msg").textContent = msg || "เกิดข้อผิดพลาด"; show("error"); }
 
+  function isPreviewEnv(){
+    const h = location.hostname;
+    return h === "" || h === "localhost" || h === "127.0.0.1" || h === "::1";
+  }
+  const SAMPLE_BILL = {
+    billType: "บิลจัด", assignee: "หมวย", requester: "สมชาย", lineStatus: "pending",
+    items: [
+      { name: "นมข้นหวาน", qty: 5, unit: "ลัง" },
+      { name: "ผงวุ้น", qty: 3, unit: "ถุง" },
+      { name: "กลิ่นนมเนยครีม(ใหญ่)", qty: 10, unit: "ลัง" }
+    ],
+    problemItems: []
+  };
+
   async function load(){
+    if(isPreviewEnv()){ render(SAMPLE_BILL); return; }
     if(!UID || !TOKEN){ return fail("ลิงก์ไม่ถูกต้อง (ไม่มี uid/token)"); }
     try{
       const res = await fetch(API_URL + "?action=getBill&uid=" + encodeURIComponent(UID) + "&token=" + encodeURIComponent(TOKEN));
@@ -108,7 +124,7 @@
   function render(bill){
     ITEMS = bill.items || [];
     $("bill-meta").innerHTML =
-      '<span>' + (bill.billType||"") + '</span><span>· มอบให้ @' + (bill.assignee||"-") + '</span>';
+      '<span>' + esc(bill.billType||"") + '</span><span>· มอบให้ @' + esc(bill.assignee||"-") + '</span>';
     $("reporter").textContent = bill.assignee || "-";
     // merge any previous problem report
     const prev = {};
@@ -118,20 +134,20 @@
     wrap.innerHTML = "";
     ITEMS.forEach((it, i) => {
       const p = prev[String(it.name).trim()] || {};
-      const startQty = (p.actualQty != null) ? p.actualQty : it.qty;
+      const startQty = Number((p.actualQty != null) ? p.actualQty : it.qty) || 0;
       const note = p.note || "";
       const el = document.createElement("div");
       el.className = "item";
       el.dataset.i = i;
       el.innerHTML =
-        '<div class="top"><div><div class="nm"></div><div class="req">เบิก ' + it.qty + ' ' + esc(it.unit) + '</div></div>'+
+        '<div class="top"><div><div class="nm"></div><div class="req">เบิก ' + (Number(it.qty)||0) + ' ' + esc(it.unit) + '</div></div>'+
         '<span class="badge ok" data-badge>ครบ ✓</span></div>'+
-        '<div class="qbox"><label>ได้จริง</label>'+
-        '<div class="stepper"><button type="button" data-d="-1">−</button>'+
-        '<input type="number" min="0" data-q value="'+ startQty +'"><button type="button" data-d="1">+</button></div>'+
+        '<div class="qbox"><label id="qlbl-'+ i +'">ได้จริง</label>'+
+        '<div class="stepper"><button type="button" data-d="-1" aria-label="ลด 1">−</button>'+
+        '<input type="number" min="0" data-q value="'+ startQty +'" aria-labelledby="qlbl-'+ i +'"><button type="button" data-d="1" aria-label="เพิ่ม 1">+</button></div>'+
         '<span class="unit">'+ esc(it.unit) +'</span></div>'+
-        '<div class="note"><span class="nl">หมายเหตุ (ทำไมไม่ครบ)</span>'+
-        '<textarea rows="2" data-note placeholder="เช่น ของเหลือไม่พอ รอเข้าใหม่">'+ esc(note) +'</textarea></div>';
+        '<div class="note"><span class="nl" id="nlbl-'+ i +'">หมายเหตุ (ทำไมไม่ครบ)</span>'+
+        '<textarea rows="2" data-note aria-labelledby="nlbl-'+ i +'" placeholder="เช่น ของเหลือไม่พอ รอเข้าใหม่">'+ esc(note) +'</textarea></div>';
       el.querySelector(".nm").textContent = it.name;
       wrap.appendChild(el);
     });
@@ -145,12 +161,13 @@
     let short = [];
     document.querySelectorAll(".item").forEach(el=>{
       const i=+el.dataset.i, it=ITEMS[i];
+      const req=Number(it.qty)||0;
       const q=Math.max(0,+el.querySelector("[data-q]").value||0);
       const badge=el.querySelector("[data-badge]");
-      if(q < it.qty){
+      if(q < req){
         el.classList.add("short");
-        badge.className="badge lack"; badge.textContent="ขาด "+(it.qty-q);
-        short.push({name:it.name,unit:it.unit,req:it.qty,got:q});
+        badge.className="badge lack"; badge.textContent="ขาด "+(req-q);
+        short.push({name:it.name,unit:it.unit,req:req,got:q});
       }else{
         el.classList.remove("short");
         badge.className="badge ok"; badge.textContent="ครบ ✓";
@@ -175,6 +192,7 @@
 
   $("submit").addEventListener("click", async ()=>{
     const btn=$("submit"); btn.disabled=true; btn.textContent="กำลังบันทึก…";
+    if(isPreviewEnv()){ setTimeout(()=>show("done"), 400); return; }
     const items=[...document.querySelectorAll(".item")].map(el=>{
       const i=+el.dataset.i, it=ITEMS[i];
       return {
