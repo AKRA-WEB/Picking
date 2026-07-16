@@ -5,11 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="referrer" content="no-referrer">
 <title>แจ้งปัญหา · เบิกสินค้า AKRA</title>
-<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
   :root{--blue:#171C8F;--orange:#E35205;--green:#16a34a;--red:#DC2626;--ink:#172033;--muted:#64748b;--line:#e2e8f0;}
   *{box-sizing:border-box;margin:0;padding:0;}
-  body{font-family:'Sarabun',system-ui,sans-serif;background:#eef2f7;color:var(--ink);min-height:100vh;}
+  body{font-family:system-ui,"Noto Sans Thai",sans-serif;background:#eef2f7;color:var(--ink);min-height:100vh;}
   .wrap{max-width:480px;margin:0 auto;background:#fff;min-height:100vh;}
   header{background:var(--blue);color:#fff;padding:16px;}
   header h1{font-size:17px;display:flex;align-items:center;gap:8px;}
@@ -73,8 +72,8 @@
 
   <div id="done" class="center" style="display:none">
     <div class="ic ok">✓</div>
-    <h2>ส่งแล้ว</h2>
-    <p>บันทึกจำนวนจริงลงระบบ และแจ้งกลุ่ม LINE เรียบร้อย</p>
+    <h2 id="done-title">ส่งแล้ว</h2>
+    <p id="done-message">บันทึกจำนวนจริงลงระบบ และแจ้งกลุ่ม LINE เรียบร้อย</p>
     <p style="margin-top:10px;font-size:12px;color:#94a3b8">ปิดหน้านี้ได้เลย</p>
   </div>
 
@@ -96,9 +95,8 @@
   function show(which){ ["loading","form","done","error"].forEach(s => $(s).style.display = s===which ? (s==="form"?"block":"block") : "none"); }
   function fail(msg){ $("error-msg").textContent = msg || "เกิดข้อผิดพลาด"; show("error"); }
 
-  function isPreviewEnv(){
-    const h = location.hostname;
-    return h === "" || h === "localhost" || h === "127.0.0.1" || h === "::1";
+  function isMockMode(){
+    return params.get("mock") === "1";
   }
   const SAMPLE_BILL = {
     billType: "บิลจัด", assignee: "หมวย", requester: "สมชาย", lineStatus: "pending", billNo: 1,
@@ -111,7 +109,7 @@
   };
 
   async function load(){
-    if(isPreviewEnv()){ render(SAMPLE_BILL); return; }
+    if(isMockMode()){ render(SAMPLE_BILL); return; }
     if(!UID || !TOKEN){ return fail("ลิงก์ไม่ถูกต้อง (ไม่มี uid/token)"); }
     try{
       const res = await fetch(API_URL + "?action=getBill&uid=" + encodeURIComponent(UID) + "&token=" + encodeURIComponent(TOKEN));
@@ -194,7 +192,14 @@
 
   $("submit").addEventListener("click", async ()=>{
     const btn=$("submit"); btn.disabled=true; btn.textContent="กำลังบันทึก…";
-    if(isPreviewEnv()){ setTimeout(()=>show("done"), 400); return; }
+    if(isMockMode()){
+      if(params.get("lineFail")==="1"){
+        $("done-title").textContent="บันทึกแล้ว แต่ยังแจ้ง LINE ไม่สำเร็จ";
+        $("done-message").textContent="Fixture: บันทึกข้อมูลแล้ว แต่ LINE ไม่ตอบกลับ กรุณาแจ้งหัวหน้างานให้ตรวจสอบกลุ่ม LINE";
+      }
+      setTimeout(()=>show("done"), 400);
+      return;
+    }
     const items=[...document.querySelectorAll(".item")].map(el=>{
       const i=+el.dataset.i, it=ITEMS[i];
       return {
@@ -212,6 +217,10 @@
       });
       const data=await res.json();
       if(!data.success){ throw new Error(data.message||"บันทึกไม่สำเร็จ"); }
+      if(data.warning){
+        $("done-title").textContent="บันทึกแล้ว แต่ยังแจ้ง LINE ไม่สำเร็จ";
+        $("done-message").textContent=data.warning+" กรุณาแจ้งหัวหน้างานให้ตรวจสอบกลุ่ม LINE";
+      }
       show("done");
     }catch(e){
       btn.disabled=false; btn.textContent="📤 บันทึก & แจ้งกลุ่ม";

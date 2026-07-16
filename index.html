@@ -4,23 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="preconnect" href="https://script.google.com">
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
   <title>เบิกสินค้า AKRA</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script defer src="https://unpkg.com/lucide@0.468.0"></script>
-  <script>
-    tailwind.config = {
-      theme: {
-        extend: {
-          colors: {
-            brand: { blue: '#171C8F', orange: '#E35205' },
-            line: { green: '#06C755' }
-          },
-          fontFamily: { sans: ['Sarabun', 'system-ui', 'sans-serif'] }
-        }
-      }
-    };
-  </script>
-  <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="assets/app.css">
+  <script defer src="assets/lucide.min.js"></script>
   <style>
     :root {
       color-scheme: light;
@@ -35,7 +22,7 @@
     body {
       margin: 0;
       min-height: 100vh;
-      font-family: 'Sarabun', system-ui, sans-serif;
+      font-family: system-ui, 'Noto Sans Thai', sans-serif;
       letter-spacing: 0;
       color: #172033;
       background: #eef2f7;
@@ -359,6 +346,7 @@
             </div>
           </div>
           <div id="history-list" class="grid gap-3"></div>
+          <button id="history-more" type="button" class="btn w-full mt-3 border-slate-300 bg-white text-slate-700 hidden">ดูรายการเพิ่มเติม</button>
           <p id="history-empty" class="panel border-dashed text-center text-slate-500 p-5 hidden">ไม่พบรายการที่ตรงกับเงื่อนไข</p>
         </div>
       </section>
@@ -369,7 +357,7 @@
   <div id="sr-status" class="visually-hidden" aria-live="polite"></div>
 
   <script>
-    const CURRENT_VERSION = "20260704.01";
+    const CURRENT_VERSION = "20260716.04";
     async function checkAppVersion() {
       try {
         const res = await fetch('version.json?t=' + Date.now());
@@ -494,23 +482,30 @@
       API_URL: "https://script.google.com/macros/s/AKfycbyQJLwb5HTexG6gxqTehGWlAxfSXVT--CpWnnp2JTcP4xCcMA1vUjSY_eWqPjUKwzq7/exec",
       PORTAL_URL: "https://akra-web.github.io/Main/",
       APP_ID: "app-pick",
-      REQUIRED_ROLES: ["ADMIN", "SUPERVISOR", "AKRA", "WAREHOUSE"],
       STORAGE_KEY: "akra_pick_session"
     };
 
     var DATA_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzChvW0QxMVRQTG2vvJIhPKCbRKQfcas_n58dGlYJaRp-b6mqdt9ebKAHtEx9HO48w/exec";
+    const PENDING_SSO_KEY = "akra_pick_pending_sso";
     const PERF_ENABLED = new URLSearchParams(window.location.search).get("perf") === "1";
     const CACHE_KEYS = {
       PRODUCTS: "pick_products_v1",
       STAFF: "pick_staff_v1",
-      REQUISITIONS: "pick_reqs_v1"
+      REQUISITIONS: "pick_reqs_v1",
+      PENDING_SUBMIT: "pick_pending_submit_v1"
     };
     const CACHE_TTL_MS = {
       PRODUCTS: 2 * 60 * 60 * 1000,
       STAFF: 2 * 60 * 60 * 1000,
       REQUISITIONS: 10 * 60 * 1000
     };
-    const REV_POLL_MS = 12000;
+    const REV_POLL_MIN_MS = 12000;
+    const REV_POLL_HISTORY_MS = 30000;
+    const REV_POLL_MAX_MS = 60000;
+    const HISTORY_PAGE_SIZE = 40;
+    const LINE_ATTEMPT_LEASE_MS = 2 * 60 * 1000;
+    const LINE_RETRY_WINDOW_MS = 24 * 60 * 60 * 1000;
+    const PENDING_SUBMIT_TTL_MS = 24 * 60 * 60 * 1000;
 
     const BILL_TYPES = {
       "บิลจัด": {
@@ -579,10 +574,17 @@
       lastRev: "",
       pollStarted: false,
       pollInFlight: false,
+      pollTimer: null,
+      pollDelayMs: REV_POLL_MIN_MS,
+      pendingWatchUid: "",
+      historyVisibleCount: HISTORY_PAGE_SIZE,
+      historyDirty: true,
+      retryClientRequestId: "",
       localStatusByUid: {}
     };
 
     const el = {};
+    const mockCache = Object.create(null);
 
     function $(id) {
       return document.getElementById(id);
@@ -617,7 +619,7 @@
 
     function readCache(key, ttlMs) {
       try {
-        const raw = localStorage.getItem(key);
+        const raw = isMockMode() ? mockCache[key] : localStorage.getItem(key);
         if (!raw) return null;
         const cached = JSON.parse(raw);
         if (!cached || !cached.ts || Date.now() - cached.ts > ttlMs) return null;
@@ -629,16 +631,116 @@
 
     function setCache(key, data) {
       try {
-        localStorage.setItem(key, JSON.stringify({ ts: Date.now(), data: data }));
+        const value = JSON.stringify({ ts: Date.now(), data: data });
+        if (isMockMode()) mockCache[key] = value;
+        else localStorage.setItem(key, value);
       } catch (e) {
         console.warn("Cache write skipped:", key, e);
       }
     }
 
+    function setCacheDeferred(key, data) {
+      const write = function () { setCache(key, data); };
+      if (typeof window.requestIdleCallback === "function") window.requestIdleCallback(write, { timeout: 1500 });
+      else window.setTimeout(write, 0);
+    }
+
+    function readPendingSsoToken() {
+      try {
+        return sessionStorage.getItem(PENDING_SSO_KEY) || "";
+      } catch (e) {
+        return "";
+      }
+    }
+
+    function persistPendingSsoToken(token) {
+      try {
+        sessionStorage.setItem(PENDING_SSO_KEY, token);
+      } catch (e) {
+        console.warn("Pending SSO storage skipped:", e);
+      }
+    }
+
+    function clearPendingSsoToken() {
+      try {
+        sessionStorage.removeItem(PENDING_SSO_KEY);
+      } catch (e) {
+        console.warn("Pending SSO cleanup skipped:", e);
+      }
+    }
+
+    function resolveBootSession(params) {
+      const urlToken = params.get("sso");
+      if (urlToken) {
+        const token = urlToken.replace(/ /g, "+");
+        persistPendingSsoToken(token);
+        if (!isMockMode()) localStorage.removeItem(APP_CONFIG.STORAGE_KEY);
+        return { token: token, fresh: true, fromUrl: true, session: null };
+      }
+      const pendingToken = readPendingSsoToken();
+      if (pendingToken) return { token: pendingToken, fresh: true, fromUrl: false, session: null };
+      const saved = localStorage.getItem(APP_CONFIG.STORAGE_KEY);
+      if (!saved) throw new Error("no_session");
+      const session = JSON.parse(saved);
+      if (!session || !session.token) throw new Error("no_session");
+      return { token: session.token, fresh: false, fromUrl: false, session: session };
+    }
+
+    function pendingSubmitStorageKey() {
+      const userId = state.session && (state.session.id || state.session.name);
+      return userId ? CACHE_KEYS.PENDING_SUBMIT + ":" + encodeURIComponent(userId) : "";
+    }
+
+    function persistPendingSubmit(snapshot) {
+      if (isMockMode() || !snapshot || !snapshot.clientRequestId) return;
+      const key = pendingSubmitStorageKey();
+      if (!key) return;
+      try {
+        localStorage.setItem(key, JSON.stringify({ ts: Date.now(), snapshot: snapshot }));
+      } catch (e) {
+        // Browser storage is a durability aid; the live submit must still proceed.
+      }
+    }
+
+    function readPendingSubmit() {
+      if (isMockMode()) return null;
+      const key = pendingSubmitStorageKey();
+      if (!key) return null;
+      try {
+        const pending = JSON.parse(localStorage.getItem(key) || "null");
+        if (!pending || !pending.snapshot || !pending.snapshot.clientRequestId) return null;
+        if (!pending.ts || Date.now() - pending.ts > PENDING_SUBMIT_TTL_MS) {
+          localStorage.removeItem(key);
+          return null;
+        }
+        return pending.snapshot;
+      } catch (e) {
+        return null;
+      }
+    }
+
+    function clearPendingSubmit(clientRequestId) {
+      if (isMockMode()) return;
+      const key = pendingSubmitStorageKey();
+      if (!key) return;
+      try {
+        const pending = readPendingSubmit();
+        if (!pending || !clientRequestId || pending.clientRequestId === clientRequestId) localStorage.removeItem(key);
+      } catch (e) {
+        // A cleanup failure must not change the confirmed server result.
+      }
+    }
+
+    function prepareProducts(products) {
+      return (products || []).filter(function (p) { return p.active !== false; }).map(function (p) {
+        return Object.assign({}, p, { _searchText: normalizeText(p.name) });
+      });
+    }
+
     function cacheCurrentData() {
-      setCache(CACHE_KEYS.PRODUCTS, state.products);
-      setCache(CACHE_KEYS.STAFF, state.staff);
-      setCache(CACHE_KEYS.REQUISITIONS, { requisitions: state.requisitions, rev: state.lastRev });
+      setCacheDeferred(CACHE_KEYS.PRODUCTS, state.products);
+      setCacheDeferred(CACHE_KEYS.STAFF, state.staff);
+      setCacheDeferred(CACHE_KEYS.REQUISITIONS, { requisitions: state.requisitions, rev: state.lastRev });
     }
 
     function hydrateCachedData() {
@@ -647,7 +749,7 @@
       const reqCache = readCache(CACHE_KEYS.REQUISITIONS, CACHE_TTL_MS.REQUISITIONS);
       var hasAny = false;
       if (Array.isArray(products)) {
-        state.products = products;
+        state.products = prepareProducts(products);
         hasAny = true;
       }
       if (Array.isArray(staff)) {
@@ -658,7 +760,7 @@
       if (reqCache && Array.isArray(reqCache.requisitions)) {
         state.requisitions = reqCache.requisitions;
         state.lastRev = reqCache.rev || state.lastRev;
-        renderHistory();
+        state.historyDirty = true;
         hasAny = true;
       }
       if (hasAny) {
@@ -677,17 +779,6 @@
     function normalizeRoles(roles) {
       if (Array.isArray(roles)) return roles.map(function (r) { return String(r || "").trim().toUpperCase(); }).filter(Boolean);
       return String(roles || "").split(",").map(function (r) { return r.trim().toUpperCase(); }).filter(Boolean);
-    }
-
-    function getPickPerms(session) {
-      return ((session && session.perms && session.perms[APP_CONFIG.APP_ID]) || []).map(String);
-    }
-
-    function hasPickAccess(session) {
-      if (!session) return false;
-      if (getPickPerms(session).length > 0) return true;
-      const roles = normalizeRoles(session.roles);
-      return roles.some(function (role) { return APP_CONFIG.REQUIRED_ROLES.indexOf(role) !== -1; });
     }
 
     function showLoading() {
@@ -722,43 +813,21 @@
       window.setTimeout(function () { node.remove(); }, 4500);
     }
 
-    function isPreviewEnv() {
-      return window.location.hostname === "" ||
-        window.location.hostname === "localhost" ||
-        window.location.hostname === "127.0.0.1" ||
-        window.location.hostname === "::1" ||
-        window.location.hostname.includes("googleusercontent") ||
-        window.self !== window.top;
+    function isMockMode() {
+      const searchParams = new URLSearchParams(window.location.search);
+      return searchParams.get("mock") === "1";
     }
 
-    async function verifySsoToken(token) {
-      const mark = perfStart("verifySsoToken");
-      const verifyUrl = APP_CONFIG.API_URL + "?action=verifyToken&token=" + encodeURIComponent(token);
-      try {
-        const res = await fetch(verifyUrl);
-        if (!res.ok) throw new Error("verify_failed");
-        const result = await res.json();
-        if (!result || !result.valid || !result.user) {
-          throw new Error((result && result.reason) || "invalid_or_expired_token");
-        }
-        const user = result.user;
-        return {
-          token: token,
-          id: user.id || "",
-          name: user.name || "",
-          roles: normalizeRoles(user.roles),
-          perms: user.perms || {}
-        };
-      } finally {
-        perfEnd(mark);
-      }
+    function createClientRequestId() {
+      if (window.crypto && typeof window.crypto.randomUUID === "function") return window.crypto.randomUUID();
+      return "pick-" + Date.now() + "-" + Math.random().toString(36).slice(2, 12);
     }
 
     async function apiCall(action, data, options) {
-      if (action !== "getInitialData" && await AppVersionGuard.blockIfStale(action)) {
+      if (action !== "getInitialData" && action !== "bootstrap" && await AppVersionGuard.blockIfStale(action)) {
         throw new Error("พบเวอร์ชันใหม่ กรุณารีโหลดก่อนทำรายการ");
       }
-      if (!DATA_SCRIPT_URL) {
+      if (isMockMode()) {
         return mockApi(action, data);
       }
       const mark = perfStart("api:" + action);
@@ -768,7 +837,8 @@
         body: JSON.stringify({
           action: action,
           data: data || {},
-          token: state.session && state.session.token
+          token: state.session && state.session.token,
+          requestId: (options && options.requestId) || ""
         })
       };
       if (options && options.priority) fetchOptions.priority = options.priority;
@@ -793,8 +863,14 @@
     }
 
     function mockApi(action, data) {
-      if (!isPreviewEnv()) {
-        return Promise.reject(new Error("ยังไม่ได้ตั้งค่า DATA_SCRIPT_URL หลัง deploy GAS"));
+      if (!isMockMode()) return Promise.reject(new Error("Mock mode requires ?mock=1"));
+      if (action === "bootstrap") {
+        const result = JSON.parse(JSON.stringify(Object.assign({ success: true }, SAMPLE_DATA)));
+        result.user = { id: "preview", name: "พนักงานคลังสินค้า (Mock)", roles: ["ADMIN"], perms: { "app-pick": ["createRequisition"] } };
+        result.rev = state.lastRev || "mock-1";
+        if (data && data.includeProducts === false) delete result.products;
+        if (data && data.includeRequisitions === false && data.historyRev === result.rev) delete result.requisitions;
+        return Promise.resolve(result);
       }
       if (action === "getInitialData") {
         return Promise.resolve(JSON.parse(JSON.stringify(Object.assign({ success: true }, SAMPLE_DATA))));
@@ -811,12 +887,21 @@
           requester: state.session.name,
           assignee: data.assignee,
           items: data.items,
-          lineStatus: "pending",
+          lineStatus: data.forceLineFailure ? "pending_line" : "pending",
+          lineAttemptAt: data.forceLineFailure ? now.toISOString() : "",
           doneBy: "",
           doneAt: "",
-          billNo: state.requisitions.filter(function (r) { return inputDate(r.timestamp) === inputDate(now); }).length + 1
+          billNo: state.requisitions.filter(function (r) {
+            return inputDate(r.timestamp) === inputDate(now) && r.clientRequestId !== data.clientRequestId;
+          }).length + 1,
+          clientRequestId: data.clientRequestId
         };
-        return Promise.resolve({ success: true, requisition: req, preview: true });
+        return Promise.resolve({ success: true, saved: true, lineSent: !data.forceLineFailure, retryable: !!data.forceLineFailure, requisition: req, rev: "mock-" + now.getTime(), preview: true });
+      }
+      if (action === "retryLine") {
+        const req = state.requisitions.find(function (row) { return row.uid === data.uid; });
+        if (!req) return Promise.reject(new Error("ไม่พบบิลนี้"));
+        return Promise.resolve({ success: true, saved: true, lineSent: true, requisition: Object.assign({}, req, { lineStatus: "pending" }), rev: "mock-" + Date.now(), preview: true });
       }
       return Promise.reject(new Error("Mock action not found"));
     }
@@ -833,35 +918,67 @@
 
     function applyInitialData(result) {
       const mark = perfStart("render:data");
-      state.products = (result.products || []).filter(function (p) { return p.active !== false; });
+      if (Array.isArray(result.products)) state.products = prepareProducts(result.products);
       state.staff = (result.staff || []).filter(function (s) { return s.active !== false; });
-      state.requisitions = (result.requisitions || []).map(mergeLocalStatus);
+      if (Array.isArray(result.requisitions)) state.requisitions = result.requisitions.map(mergeLocalStatus);
       state.lastRev = result.rev || state.lastRev;
       renderStaff();
-      renderHistory();
+      state.historyDirty = true;
+      if (state.activeTab === "history") renderHistory();
       renderPreview();
       cacheCurrentData();
       perfEnd(mark);
+    }
+
+    function applyBootstrapData(result) {
+      const token = state.session && state.session.token;
+      if (result.user) {
+        state.session = {
+          token: token,
+          id: result.user.id || "",
+          name: result.user.name || "",
+          roles: normalizeRoles(result.user.roles),
+          perms: result.user.perms || {}
+        };
+      }
+      applyInitialData(result);
     }
 
     function applyRequisitions(result) {
       const mark = perfStart("render:requisitions");
       state.requisitions = (result.requisitions || []).map(mergeLocalStatus);
       state.lastRev = result.rev || state.lastRev;
-      renderHistory();
+      if (state.pendingWatchUid) {
+        const watched = state.requisitions.find(function (req) { return req.uid === state.pendingWatchUid; });
+        if (!watched || (watched.lineStatus !== "pending" && watched.lineStatus !== "pending_line" && watched.lineStatus !== "line_sending")) {
+          state.pendingWatchUid = "";
+        }
+      }
+      state.historyDirty = true;
+      if (state.activeTab === "history") renderHistory();
       setCache(CACHE_KEYS.REQUISITIONS, { requisitions: state.requisitions, rev: state.lastRev });
+      reconcilePendingSubmit();
       perfEnd(mark);
     }
 
-    async function loadInitialData(silent, options) {
+    async function loadBootstrap(silent, options) {
       try {
         if (!silent) $("form-status").textContent = "กำลังโหลดข้อมูล...";
-        const result = await apiCall("getInitialData", null, options);
-        applyInitialData(result);
+        const allowCachedData = !options || options.allowCachedData !== false;
+        const includeProducts = !allowCachedData || !readCache(CACHE_KEYS.PRODUCTS, CACHE_TTL_MS.PRODUCTS);
+        const historyCache = allowCachedData ? readCache(CACHE_KEYS.REQUISITIONS, CACHE_TTL_MS.REQUISITIONS) : null;
+        const result = await apiCall("bootstrap", {
+          includeProducts: includeProducts,
+          includeRequisitions: !historyCache,
+          historyRev: (historyCache && historyCache.rev) || ""
+        }, options);
+        applyBootstrapData(result);
+        if (!isMockMode()) localStorage.setItem(APP_CONFIG.STORAGE_KEY, JSON.stringify(state.session));
+        clearPendingSsoToken();
+        showApp();
+        reconcilePendingSubmit();
         $("form-status").textContent = "พร้อมทำรายการ";
-      } catch (e) {
-        $("form-status").textContent = "โหลดข้อมูลไม่สำเร็จ";
-        toast(e.message, "error");
+        return result;
       } finally {
         $("data-loading").classList.add("hidden");
       }
@@ -874,6 +991,7 @@
     }
 
     async function fetchDataRev() {
+      if (isMockMode()) return state.lastRev || "mock-1";
       if (!DATA_SCRIPT_URL) return state.lastRev || "0";
       const mark = perfStart("api:getRev");
       try {
@@ -887,35 +1005,55 @@
       }
     }
 
-    async function pollForUpdates(force) {
-      if (!force && document.visibilityState !== "visible") return;
-      if (!state.session || state.pollInFlight || state.isSubmitting) return;
+    function shouldPollUpdates() {
+      if (state.pendingWatchUid) {
+        const watched = state.requisitions.find(function (req) { return req.uid === state.pendingWatchUid; });
+        if (!shouldWatchRequisition(watched)) state.pendingWatchUid = "";
+      }
+      return !!state.session && document.visibilityState === "visible" &&
+        (state.activeTab === "history" || !!state.pendingWatchUid);
+    }
+
+    function scheduleNextPoll(delayMs) {
+      if (state.pollTimer) window.clearTimeout(state.pollTimer);
+      state.pollTimer = null;
+      if (!shouldPollUpdates()) return;
+      state.pollTimer = window.setTimeout(function () { pollForUpdates(); }, Math.max(0, delayMs));
+    }
+
+    async function pollForUpdates() {
+      if (!shouldPollUpdates() || state.pollInFlight || state.isSubmitting) {
+        scheduleNextPoll(REV_POLL_MIN_MS);
+        return;
+      }
       state.pollInFlight = true;
       try {
         const rev = await fetchDataRev();
         if (!state.lastRev) {
           state.lastRev = rev;
           setCache(CACHE_KEYS.REQUISITIONS, { requisitions: state.requisitions, rev: state.lastRev });
-          return;
-        }
-        if (rev && rev !== state.lastRev) {
+        } else if (rev && rev !== state.lastRev) {
           await refreshRequisitions({ priority: "low" });
         }
+        state.pollDelayMs = state.pendingWatchUid ? REV_POLL_MIN_MS : REV_POLL_HISTORY_MS;
+        if (state.activeTab === "history") renderHistory();
       } catch (e) {
         if (PERF_ENABLED) console.warn("Polling skipped:", e);
+        state.pollDelayMs = Math.min(Math.max(state.pollDelayMs * 2, REV_POLL_MIN_MS), REV_POLL_MAX_MS);
       } finally {
         state.pollInFlight = false;
+        scheduleNextPoll(state.pollDelayMs);
       }
     }
 
     function startRevPolling() {
       if (state.pollStarted) return;
       state.pollStarted = true;
-      window.setInterval(function () { pollForUpdates(false); }, REV_POLL_MS);
       document.addEventListener("visibilitychange", function () {
-        if (document.visibilityState === "visible") pollForUpdates(true);
+        scheduleNextPoll(document.visibilityState === "visible" ? 0 : REV_POLL_MIN_MS);
       });
-      window.addEventListener("focus", function () { pollForUpdates(true); });
+      window.addEventListener("focus", function () { scheduleNextPoll(0); });
+      scheduleNextPoll(0);
     }
 
     function renderStaff() {
@@ -941,8 +1079,11 @@
       $("pane-history").classList.toggle("hidden", tab !== "history");
       $("tab-new").classList.toggle("tab-active", tab === "new");
       $("tab-history").classList.toggle("tab-active", tab === "history");
-      if (tab === "history") renderHistory();
-      refreshIcons();
+      if (tab === "history") {
+        state.historyVisibleCount = HISTORY_PAGE_SIZE;
+        renderHistory();
+      }
+      scheduleNextPoll(0);
     }
 
     function setBillType(type) {
@@ -977,7 +1118,7 @@
     function exactProductByName(name) {
       const q = normalizeText(name);
       if (!q) return null;
-      return state.products.find(function (p) { return normalizeText(p.name) === q; }) || null;
+      return state.products.find(function (p) { return p._searchText === q; }) || null;
     }
 
     function validRow(item) {
@@ -1027,7 +1168,7 @@
       state.activeProductIndex = -1;
       const q = normalizeText(value);
       state.productResults = q
-        ? state.products.filter(function (p) { return normalizeText(p.name).indexOf(q) !== -1; }).slice(0, 12)
+        ? state.products.filter(function (p) { return p._searchText.indexOf(q) !== -1; }).slice(0, 12)
         : [];
       renderRowResults(li, index);
       setRowWarning(li, index);
@@ -1202,7 +1343,6 @@
       $("line-preview-meta").textContent = "บิลใหม่ · " + formatThaiDateTime(new Date());
       $("preview-status").textContent = "รอจัด";
       $("preview-status").className = "text-xs font-bold rounded-full px-2.5 py-1 bg-slate-100 text-slate-600";
-      refreshIcons();
     }
 
     function focusFirstRowName() {
@@ -1298,7 +1438,7 @@
     function createOptimisticRequisition(snapshot) {
       const now = new Date();
       return {
-        uid: "PENDING-" + now.getTime(),
+        uid: "PENDING-" + snapshot.clientRequestId,
         timestamp: now.toISOString(),
         billType: snapshot.billType,
         requester: state.session.name || "",
@@ -1309,15 +1449,22 @@
         clientMessage: "กำลังส่งเข้า LINE",
         doneBy: "",
         doneAt: "",
-        billNo: state.requisitions.filter(function (r) { return inputDate(r.timestamp) === inputDate(now); }).length + 1
+        billNo: state.requisitions.filter(function (r) { return inputDate(r.timestamp) === inputDate(now); }).length + 1,
+        clientRequestId: snapshot.clientRequestId
       };
     }
 
     function replaceRequisition(uid, req) {
-      const index = state.requisitions.findIndex(function (row) { return row.uid === uid; });
-      if (index >= 0) state.requisitions.splice(index, 1, req);
-      else state.requisitions.unshift(req);
-      renderHistory();
+      const clientRequestId = req && req.clientRequestId;
+      let insertIndex = -1;
+      state.requisitions = state.requisitions.filter(function (row, index) {
+        const matches = row.uid === uid || (clientRequestId && row.clientRequestId === clientRequestId);
+        if (matches && insertIndex === -1) insertIndex = index;
+        return !matches;
+      });
+      state.requisitions.splice(insertIndex < 0 ? 0 : Math.min(insertIndex, state.requisitions.length), 0, req);
+      state.historyDirty = true;
+      if (state.activeTab === "history") renderHistory();
     }
 
     function markOptimisticFailed(uid, message, serverReq) {
@@ -1352,6 +1499,25 @@
       renderPreview();
     }
 
+    function reconcilePendingSubmit() {
+      const snapshot = readPendingSubmit();
+      if (!snapshot) return;
+      const persisted = state.requisitions.find(function (req) {
+        return req.clientRequestId === snapshot.clientRequestId;
+      });
+      if (persisted) {
+        const restored = state.retryClientRequestId === snapshot.clientRequestId;
+        clearPendingSubmit(snapshot.clientRequestId);
+        state.retryClientRequestId = "";
+        if (restored) resetForm();
+        return;
+      }
+      if (state.retryClientRequestId === snapshot.clientRequestId) return;
+      state.retryClientRequestId = snapshot.clientRequestId;
+      restoreSubmitSnapshot(snapshot);
+      toast("พบรายการที่ยังไม่ยืนยันผล กดส่งอีกครั้งเพื่อใช้คำขอเดิมโดยไม่สร้างบิลซ้ำ", "warning");
+    }
+
     async function submitRequisition(event) {
       event.preventDefault();
       if (state.isSubmitting) return;
@@ -1360,11 +1526,12 @@
       const snapshot = {
         billType: state.billType,
         assignee: $("staff-select").value,
-        items: cloneSubmitItems(submitItems)
+        items: cloneSubmitItems(submitItems),
+        clientRequestId: state.retryClientRequestId || createClientRequestId()
       };
+      persistPendingSubmit(snapshot);
       const optimistic = createOptimisticRequisition(snapshot);
-      state.requisitions.unshift(optimistic);
-      renderHistory();
+      replaceRequisition(optimistic.uid, optimistic);
       resetForm();
       state.isSubmitting = true;
       $("submit-btn").disabled = true;
@@ -1374,21 +1541,57 @@
         const result = await apiCall("saveRequisition", {
           billType: snapshot.billType,
           assignee: snapshot.assignee,
-          items: snapshot.items
-        });
+          items: snapshot.items,
+          clientRequestId: snapshot.clientRequestId
+        }, { requestId: snapshot.clientRequestId });
+        state.retryClientRequestId = "";
+        if (result.saved) clearPendingSubmit(snapshot.clientRequestId);
+        state.lastRev = result.rev || state.lastRev;
         if (result.requisition) {
           delete state.localStatusByUid[result.requisition.uid];
           replaceRequisition(optimistic.uid, result.requisition);
           setCache(CACHE_KEYS.REQUISITIONS, { requisitions: state.requisitions, rev: state.lastRev });
+          state.pendingWatchUid = shouldWatchRequisition(result.requisition) ? result.requisition.uid : "";
         }
-        toast(result.preview ? "บันทึกตัวอย่างแล้ว" : "ส่งเข้า LINE และบันทึกแล้ว", "success");
-        $("form-status").textContent = "พร้อมทำรายการ";
+        const persistedStatus = result.requisition && result.requisition.lineStatus;
+        if (needsLineRecovery(result)) {
+          toast(result.message || "บันทึกแล้ว แต่ยังส่ง LINE ไม่สำเร็จ", "warning");
+          $("form-status").textContent = persistedStatus === "line_failed" ? "บันทึกแล้ว · ต้องตรวจสอบ LINE กับหัวหน้างาน" : "บันทึกแล้ว · รอตรวจสอบสถานะ LINE";
+        } else {
+          toast(result.preview ? "บันทึกตัวอย่างแล้ว" : "ส่งเข้า LINE และบันทึกแล้ว", "success");
+          $("form-status").textContent = "พร้อมทำรายการ";
+        }
+        scheduleNextPoll(REV_POLL_MIN_MS);
       } catch (e) {
         const serverReq = e.result && e.result.requisition;
-        markOptimisticFailed(optimistic.uid, e.message, serverReq);
-        restoreSubmitSnapshot(snapshot);
-        toast(e.message, "error");
-        $("form-status").textContent = "ส่งไม่สำเร็จ";
+        if (e.result && e.result.idempotencyConflict) {
+          state.requisitions = state.requisitions.filter(function (row) { return row.uid !== optimistic.uid; });
+          state.historyDirty = true;
+          if (state.activeTab === "history") renderHistory();
+          const retrySnapshot = Object.assign({}, snapshot, { clientRequestId: createClientRequestId() });
+          state.retryClientRequestId = retrySnapshot.clientRequestId;
+          persistPendingSubmit(retrySnapshot);
+          restoreSubmitSnapshot(retrySnapshot);
+          toast(e.message, "warning");
+          $("form-status").textContent = "ข้อมูลที่แก้ไขยังไม่ได้บันทึก · ตรวจสอบแล้วกดส่งใหม่";
+        } else if (serverReq && e.result.saved) {
+          state.lastRev = e.result.rev || state.lastRev;
+          delete state.localStatusByUid[serverReq.uid];
+          replaceRequisition(optimistic.uid, serverReq);
+          setCache(CACHE_KEYS.REQUISITIONS, { requisitions: state.requisitions, rev: state.lastRev });
+          state.pendingWatchUid = shouldWatchRequisition(serverReq) ? serverReq.uid : "";
+          state.retryClientRequestId = "";
+          clearPendingSubmit(snapshot.clientRequestId);
+          toast(e.message, "warning");
+          $("form-status").textContent = serverReq.lineStatus === "line_failed" ? "บันทึกแล้ว · ต้องตรวจสอบ LINE กับหัวหน้างาน" : "บันทึกแล้ว · รอตรวจสอบสถานะ LINE";
+          scheduleNextPoll(REV_POLL_MIN_MS);
+        } else {
+          markOptimisticFailed(optimistic.uid, e.message, serverReq);
+          state.retryClientRequestId = snapshot.clientRequestId;
+          restoreSubmitSnapshot(snapshot);
+          toast(e.message, "error");
+          $("form-status").textContent = "ส่งไม่สำเร็จ";
+        }
       } finally {
         perfEnd(mark);
         state.isSubmitting = false;
@@ -1407,6 +1610,9 @@
     function statusMeta(status) {
       if (status === "sending") return { text: "กำลังส่ง...", cls: "bg-indigo-100 text-indigo-800", icon: "loader" };
       if (status === "failed") return { text: "ส่งไม่สำเร็จ", cls: "bg-red-100 text-red-800", icon: "circle-alert" };
+      if (status === "line_sending") return { text: "กำลังส่ง LINE", cls: "bg-indigo-100 text-indigo-800", icon: "loader" };
+      if (status === "pending_line") return { text: "บันทึกแล้ว · LINE ล้มเหลว", cls: "bg-amber-100 text-amber-800", icon: "circle-alert" };
+      if (status === "line_failed") return { text: "LINE ต้องตรวจสอบเอง", cls: "bg-red-100 text-red-800", icon: "circle-alert" };
       if (status === "sent") return { text: "ส่งแล้ว", cls: "bg-blue-100 text-blue-800", icon: "truck" };
       if (status === "picked" || status === "done") return { text: "จัดเสร็จ (รอส่ง)", cls: "bg-green-100 text-green-800", icon: "check-circle" };
       if (status === "problem") return { text: "มีปัญหา", cls: "bg-amber-100 text-amber-800", icon: "triangle-alert" };
@@ -1418,11 +1624,77 @@
       return '<span class="rounded-full px-2.5 py-1 text-xs font-bold ' + meta.badge + '">' + esc(type) + '</span>';
     }
 
+    async function retryLine(uid) {
+      const req = state.requisitions.find(function (row) { return row.uid === uid; });
+      if (!req || !canRetryLine(req)) return;
+      replaceRequisition(uid, Object.assign({}, req, { lineStatus: "line_sending" }));
+      try {
+        const requestId = createClientRequestId();
+        const result = await apiCall("retryLine", { uid: uid }, { requestId: requestId });
+        state.lastRev = result.rev || state.lastRev;
+        if (result.requisition) {
+          replaceRequisition(uid, result.requisition);
+          state.pendingWatchUid = shouldWatchRequisition(result.requisition) ? result.requisition.uid : "";
+        }
+        if (!needsLineRecovery(result)) {
+          toast("ส่ง LINE สำเร็จ", "success");
+        } else {
+          toast(result.message || "ยังส่ง LINE ไม่สำเร็จ", "warning");
+        }
+        setCache(CACHE_KEYS.REQUISITIONS, { requisitions: state.requisitions, rev: state.lastRev });
+        scheduleNextPoll(REV_POLL_MIN_MS);
+      } catch (e) {
+        const serverReq = e.result && e.result.requisition;
+        if (serverReq && e.result.saved) {
+          state.lastRev = e.result.rev || state.lastRev;
+          replaceRequisition(uid, serverReq);
+          state.pendingWatchUid = shouldWatchRequisition(serverReq) ? serverReq.uid : "";
+          setCache(CACHE_KEYS.REQUISITIONS, { requisitions: state.requisitions, rev: state.lastRev });
+          scheduleNextPoll(REV_POLL_MIN_MS);
+          toast(e.message, "warning");
+        } else {
+          replaceRequisition(uid, req);
+          toast(e.message, "error");
+        }
+      }
+    }
+
+    function canRetryLine(req) {
+      if (!req) return false;
+      if (isLineRetryExpiredClient(req)) return false;
+      if (req.lineStatus === "pending_line") return true;
+      if (req.lineStatus !== "line_sending" || !req.lineAttemptAt) return false;
+      const attempt = new Date(req.lineAttemptAt);
+      return !Number.isNaN(attempt.getTime()) && Date.now() - attempt.getTime() >= LINE_ATTEMPT_LEASE_MS;
+    }
+
+    function needsLineRecovery(result) {
+      const status = result && result.requisition && result.requisition.lineStatus;
+      return !result || result.lineSent !== true || ["line_sending", "pending_line", "line_failed"].indexOf(status) !== -1;
+    }
+
+    function shouldWatchRequisition(req) {
+      if (!req) return false;
+      if (req.lineStatus === "pending") return true;
+      if (req.lineStatus !== "pending_line" && req.lineStatus !== "line_sending") return false;
+      return !isLineRetryExpiredClient(req);
+    }
+
+    function isLineRetryExpiredClient(req) {
+      if (!req || !req.timestamp) return false;
+      const created = new Date(req.timestamp);
+      return !Number.isNaN(created.getTime()) && Date.now() - created.getTime() >= LINE_RETRY_WINDOW_MS;
+    }
+
     function renderHistory() {
+      if (state.activeTab !== "history") {
+        state.historyDirty = true;
+        return;
+      }
       const q = normalizeText($("history-search").value);
       const date = $("history-date").value;
       const type = $("history-type").value;
-      const rows = state.requisitions.filter(function (req) {
+      const filteredRows = state.requisitions.filter(function (req) {
         const items = req.items || [];
         const text = normalizeText([req.uid, req.billType, req.assignee, items.map(function (it) { return it.name; }).join(" ")].join(" "));
         const reqDate = inputDate(req.timestamp);
@@ -1430,9 +1702,11 @@
           (!date || reqDate === date) &&
           (!type || req.billType === type);
       });
+      const rows = filteredRows.slice(0, state.historyVisibleCount);
       const list = $("history-list");
       list.innerHTML = "";
-      $("history-empty").classList.toggle("hidden", rows.length > 0);
+      $("history-empty").classList.toggle("hidden", filteredRows.length > 0);
+      $("history-more").classList.toggle("hidden", filteredRows.length <= rows.length);
       rows.forEach(function (req) {
         const meta = statusMeta(req.clientStatus || req.lineStatus);
         const items = req.items || [];
@@ -1453,9 +1727,14 @@
           '<p class="mt-2 text-sm text-slate-500">มอบให้ @' + esc(req.assignee || "-") +
             (req.doneBy ? ' · โดย ' + esc(req.doneBy) + ' ' + esc(formatThaiTime(req.doneAt)) : '') +
           '</p>' +
-          (req.clientMessage ? '<p class="mt-2 text-sm font-semibold text-red-700">' + esc(req.clientMessage) + '</p>' : '');
+          (req.clientMessage ? '<p class="mt-2 text-sm font-semibold text-red-700">' + esc(req.clientMessage) + '</p>' : '') +
+          (isLineRetryExpiredClient(req) ? '<p class="mt-2 text-sm font-semibold text-red-700">เกิน 24 ชั่วโมงแล้ว กรุณาตรวจสอบกับกลุ่ม LINE และหัวหน้างานก่อนดำเนินการต่อ</p>' : '') +
+          (canRetryLine(req) ? '<button type="button" class="retry-line-btn btn mt-3 px-3 border-amber-500 bg-amber-50 text-amber-800">ส่ง LINE ซ้ำ</button>' : '');
+        const retryButton = node.querySelector(".retry-line-btn");
+        if (retryButton) retryButton.addEventListener("click", function () { retryLine(req.uid); });
         list.appendChild(node);
       });
+      state.historyDirty = false;
     }
 
     function inputDate(value) {
@@ -1487,9 +1766,27 @@
 
     function bindEvents() {
       $("portal-btn").addEventListener("click", function () { window.location.href = APP_CONFIG.PORTAL_URL; });
-      $("refresh-btn").addEventListener("click", function () { loadInitialData(true); });
+      $("refresh-btn").addEventListener("click", function () {
+        loadBootstrap(true, { requestId: createClientRequestId() }).catch(function (e) {
+          const reason = (e.result && e.result.reason) || e.message;
+          if (reason === "verify_failed") {
+            $("form-status").textContent = "เครือข่ายขัดข้องชั่วคราว · ข้อมูลเดิมยังอยู่";
+            toast("ตรวจสอบสิทธิ์ไม่สำเร็จชั่วคราว กรุณาลองใหม่", "warning");
+            return;
+          }
+          if (["no_token", "invalid_or_expired_token", "permission_denied"].indexOf(reason) !== -1) {
+            if (!isMockMode()) localStorage.removeItem(APP_CONFIG.STORAGE_KEY);
+            showError(reason === "permission_denied" ? "คุณไม่มีสิทธิ์เข้าใช้งานแอปนี้" : "กรุณาเข้าสู่ระบบผ่าน Portal อีกครั้ง");
+            return;
+          }
+          toast(e.message || "รีเฟรชข้อมูลไม่สำเร็จ", "error");
+        });
+      });
       $("logout-btn").addEventListener("click", function () {
-        localStorage.removeItem(APP_CONFIG.STORAGE_KEY);
+        if (!isMockMode()) {
+          localStorage.removeItem(APP_CONFIG.STORAGE_KEY);
+          clearPendingSsoToken();
+        }
         window.location.href = APP_CONFIG.PORTAL_URL;
       });
       $("tab-new").addEventListener("click", function () { setTab("new"); });
@@ -1505,69 +1802,75 @@
       $("add-row-btn").addEventListener("click", function () { addRow(true); });
       $("staff-select").addEventListener("change", renderPreview);
       $("requisition-form").addEventListener("submit", submitRequisition);
-      $("history-search").addEventListener("input", renderHistory);
-      $("history-date").addEventListener("change", renderHistory);
-      $("history-type").addEventListener("change", renderHistory);
+      $("history-search").addEventListener("input", function () { state.historyVisibleCount = HISTORY_PAGE_SIZE; renderHistory(); });
+      $("history-date").addEventListener("change", function () { state.historyVisibleCount = HISTORY_PAGE_SIZE; renderHistory(); });
+      $("history-type").addEventListener("change", function () { state.historyVisibleCount = HISTORY_PAGE_SIZE; renderHistory(); });
+      $("history-more").addEventListener("click", function () { state.historyVisibleCount += HISTORY_PAGE_SIZE; renderHistory(); });
     }
 
     async function boot() {
-      const versionOk = await checkAppVersion();
-      if (!versionOk) return;
-      AppVersionGuard.start({ current: CURRENT_VERSION, readActions: ["getInitialData", "getRequisitions"] });
+      AppVersionGuard.start({ current: CURRENT_VERSION, readActions: ["bootstrap", "getInitialData", "getRequisitions"] });
+      checkAppVersion();
       bindEvents();
       setBillType("บิลจัด");
       if (state.items.length === 0) addRow(false);
       else renderItemRows();
       renderPreview();
       showLoading();
+      let hadCache = false;
       try {
-        if (isPreviewEnv()) {
+        if (isMockMode()) {
           state.session = {
-            token: "preview",
+            token: "mock",
             id: "preview",
-            name: "พนักงานคลังสินค้า (Preview)",
+            name: "พนักงานคลังสินค้า (Mock)",
             roles: ["ADMIN"],
             perms: { "app-pick": ["createRequisition"] }
           };
           showApp();
-          await loadInitialData();
+          hadCache = hydrateCachedData();
+          await loadBootstrap(hadCache);
+          startRevPolling();
           return;
         }
         const params = new URLSearchParams(window.location.search);
-        const ssoToken = params.get("sso");
-        if (ssoToken) {
-          const fixedToken = ssoToken.replace(/ /g, "+");
-          state.session = await verifySsoToken(fixedToken);
-          if (!hasPickAccess(state.session)) throw new Error("permission_denied");
-          localStorage.setItem(APP_CONFIG.STORAGE_KEY, JSON.stringify(state.session));
+        const bootSession = resolveBootSession(params);
+        if (bootSession.fromUrl) {
           params.delete("sso");
           const url = new URL(window.location.href);
           url.search = params.toString();
           window.history.replaceState({}, document.title, url.toString());
-          showApp();
-          hydrateCachedData();
-          await loadInitialData(false);
-        } else {
-          const saved = localStorage.getItem(APP_CONFIG.STORAGE_KEY);
-          if (!saved) throw new Error("no_session");
-          const parsed = JSON.parse(saved);
-          if (!parsed || !parsed.token) throw new Error("no_session");
-          state.session = parsed;
-          showApp();
-          const hadCache = hydrateCachedData();
-          const verifyPromise = verifySsoToken(parsed.token);
-          const dataPromise = loadInitialData(hadCache, { priority: hadCache ? "low" : undefined });
-          const verified = await verifyPromise;
-          if (!hasPickAccess(verified)) throw new Error("permission_denied");
-          state.session = verified;
-          localStorage.setItem(APP_CONFIG.STORAGE_KEY, JSON.stringify(state.session));
-          showApp();
-          await dataPromise;
         }
+        state.session = Object.assign({}, bootSession.session || {}, { token: bootSession.token });
+        if (!bootSession.fresh) {
+          showApp();
+          hadCache = hydrateCachedData();
+        }
+        await loadBootstrap(hadCache, {
+          allowCachedData: !bootSession.fresh,
+          priority: hadCache ? "low" : undefined,
+          requestId: createClientRequestId()
+        });
         startRevPolling();
       } catch (e) {
-        localStorage.removeItem(APP_CONFIG.STORAGE_KEY);
-        const message = e.message === "permission_denied" ? "คุณไม่มีสิทธิ์เข้าใช้งานแอปนี้" : "กรุณาเข้าสู่ระบบผ่าน Portal อีกครั้ง";
+        const reason = (e.result && e.result.reason) || e.message;
+        if (reason === "verify_failed") {
+          if (hadCache && state.session) {
+            showApp();
+            $("data-loading").classList.add("hidden");
+            $("form-status").textContent = "เชื่อมต่อเพื่อตรวจสอบสิทธิ์ไม่สำเร็จ · กดรีเฟรชเพื่อลองใหม่";
+            toast("เครือข่ายขัดข้องชั่วคราว ข้อมูลเดิมยังอยู่และยังไม่ถูกล้าง", "warning");
+            return;
+          }
+          return showError("เชื่อมต่อระบบตรวจสอบสิทธิ์ไม่สำเร็จ กรุณาลองรีเฟรชอีกครั้ง");
+        }
+        if (["no_token", "no_session", "invalid_or_expired_token", "permission_denied"].indexOf(reason) !== -1) {
+          if (!isMockMode()) {
+            localStorage.removeItem(APP_CONFIG.STORAGE_KEY);
+            clearPendingSsoToken();
+          }
+        }
+        const message = reason === "permission_denied" ? "คุณไม่มีสิทธิ์เข้าใช้งานแอปนี้" : "กรุณาเข้าสู่ระบบผ่าน Portal อีกครั้ง";
         showError(message);
       }
     }
