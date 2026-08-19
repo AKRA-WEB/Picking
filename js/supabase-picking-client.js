@@ -93,7 +93,7 @@
      * Get Requisition History
      */
     async function getRequisitions(limit = 50) {
-        const bills = await supabaseRest(`picking_bills?select=*,items:picking_items(*)&order=requisition_date.desc&limit=${limit}`);
+        const bills = await supabaseRest(`picking_bills?select=*,items:picking_items(*)&order=created_at.desc&limit=${limit}`);
         return {
             status: 'success',
             bills: bills || []
