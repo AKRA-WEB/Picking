@@ -358,7 +358,7 @@
 
   <script src="js/supabase-picking-client.js"></script>
   <script>
-    const CURRENT_VERSION = "20260820.02";
+    const CURRENT_VERSION = "20260820.03";
     async function checkAppVersion() {
       try {
         const res = await fetch('version.json?t=' + Date.now());
@@ -849,15 +849,26 @@
       if (isMockMode()) {
         return mockApi(action, data);
       }
-      if (typeof window !== 'undefined' && window.AkraSupabasePicking && (action === 'bootstrap' || action === 'getInitialData' || action === 'getRequisitions')) {
+      if (typeof window !== 'undefined' && window.AkraSupabasePicking && (action === 'bootstrap' || action === 'getInitialData' || action === 'getRequisitions' || action === 'saveRequisition')) {
         try {
           if (action === 'bootstrap' || action === 'getInitialData') {
-            const history = await AkraSupabasePicking.getRequisitions(50);
+            const historyPromise = AkraSupabasePicking.getRequisitions(50);
+            let productsPromise = Promise.resolve((state.products && state.products.length) ? state.products : null);
+            if (!state.products || !state.products.length) {
+              const cachedProd = readCache(CACHE_KEYS.PRODUCTS, CACHE_TTL_MS.PRODUCTS);
+              if (cachedProd && cachedProd.length) {
+                productsPromise = Promise.resolve(cachedProd);
+              } else {
+                productsPromise = AkraSupabasePicking.getProducts();
+              }
+            }
+            const staffPromise = AkraSupabasePicking.getStaff();
+            const [history, prods, staff] = await Promise.all([historyPromise, productsPromise, staffPromise]);
             return {
               success: true,
               user: state.session,
-              products: (state.products && state.products.length) ? state.products : [],
-              staff: [{ id: '1', name: (state.session && state.session.name) || 'พนักงานคลังสินค้า', branch: 'W1' }],
+              products: prods || [],
+              staff: staff || [],
               requisitions: (history && history.bills) || [],
               rev: 'supa-' + Date.now()
             };
@@ -865,6 +876,16 @@
           if (action === 'getRequisitions') {
             const history = await AkraSupabasePicking.getRequisitions(50);
             return { success: true, requisitions: (history && history.bills) || [], rev: 'supa-' + Date.now() };
+          }
+          if (action === 'saveRequisition') {
+            const res = await AkraSupabasePicking.saveRequisition({
+              billType: data.billType,
+              assignee: data.assignee,
+              requester: (state.session && (state.session.name || state.session.id)) || 'ผู้ใช้งาน',
+              items: data.items,
+              clientRequestId: data.clientRequestId || (options && options.requestId)
+            });
+            return res;
           }
         } catch (supaErr) {
           console.warn('Supabase Picking error, falling back to GAS:', supaErr);
