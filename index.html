@@ -356,7 +356,7 @@
   <div id="toast-container" class="toast-container" aria-live="polite" aria-atomic="true"></div>
   <div id="sr-status" class="visually-hidden" aria-live="polite"></div>
   <script>
-    const CURRENT_VERSION = "20260820.04";
+    const CURRENT_VERSION = "20260914.01";
     async function checkAppVersion() {
       try {
         const res = await fetch('version.json?t=' + Date.now());
@@ -1032,7 +1032,11 @@
           historyRev: (historyCache && historyCache.rev) || ""
         }, options);
         applyBootstrapData(result);
-        if (!isMockMode()) localStorage.setItem(APP_CONFIG.STORAGE_KEY, JSON.stringify(state.session));
+        try {
+          if (!isMockMode()) localStorage.setItem(APP_CONFIG.STORAGE_KEY, JSON.stringify(state.session));
+        } catch (error) {
+          console.warn('Session cache write skipped; current session remains available in memory.');
+        }
         clearPendingSsoToken();
         showApp();
         reconcilePendingSubmit();
