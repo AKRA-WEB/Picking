@@ -6,6 +6,9 @@
 <meta name="referrer" content="no-referrer">
 <title>แจ้งปัญหา · เบิกสินค้า AKRA</title>
 <style>
+  [hidden]{display:none!important;}
+  .secondary{display:block;width:100%;padding:12px;margin-top:10px;border:1px solid #cbd5e1;border-radius:10px;background:#fff;color:var(--blue);font:inherit;min-height:44px;}
+  #form-status{margin:12px 0;font-size:13px;line-height:1.6;}
   :root{--blue:#171C8F;--orange:#E35205;--green:#16a34a;--red:#DC2626;--ink:#172033;--muted:#64748b;--line:#e2e8f0;}
   *{box-sizing:border-box;margin:0;padding:0;}
   body{font-family:system-ui,"Noto Sans Thai",sans-serif;background:#eef2f7;color:var(--ink);min-height:100vh;}
@@ -18,15 +21,15 @@
   .item{border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:12px;transition:.15s;}
   .item.short{border-color:#fca5a5;background:#fff7f7;}
   .item .top{display:flex;align-items:flex-start;gap:10px;}
-  .item .nm{font-weight:700;font-size:15px;flex:1;}
+  .item .nm{font-weight:700;font-size:15px;flex:1;overflow-wrap:anywhere;}
   .item .req{font-size:12px;color:var(--muted);margin-top:2px;}
-  .qbox{display:flex;align-items:center;gap:8px;margin-top:10px;}
+  .qbox{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-top:10px;}
   .qbox label{font-size:13px;color:#475569;font-weight:600;}
   .stepper{display:flex;align-items:center;border:1px solid #cbd5e1;border-radius:9px;overflow:hidden;}
-  .stepper button{width:38px;height:40px;border:0;background:#f1f5f9;font-size:19px;color:var(--blue);font-weight:700;}
+  .stepper button{width:44px;height:44px;border:0;background:#f1f5f9;font-size:19px;color:var(--blue);font-weight:700;}
   .stepper button:active{background:#e2e8f0;}
   .stepper input{width:56px;height:40px;border:0;text-align:center;font-family:inherit;font-size:15px;font-weight:700;}
-  .unit{font-size:13px;color:#475569;}
+  .unit{font-size:13px;color:#475569;overflow-wrap:anywhere;}
   .badge{margin-left:auto;font-size:12px;font-weight:700;padding:4px 10px;border-radius:999px;}
   .badge.ok{background:#dcfce7;color:#166534;}
   .badge.lack{background:#fee2e2;color:#991b1b;}
@@ -66,14 +69,17 @@
       <div id="items"></div>
       <div class="summary" id="summary"></div>
       <div class="reporter">ผู้แจ้ง: <b id="reporter">-</b></div>
-      <button class="submit" id="submit">📤 บันทึก &amp; แจ้งกลุ่ม</button>
+      <p id="form-status" role="status" aria-live="polite"></p>
+      <button class="secondary" id="restore-pending" type="button" hidden>กู้คืนคำขอค้าง</button>
+      <button class="secondary" id="reload-latest" type="button" hidden>โหลดข้อมูลล่าสุด (แทนที่แบบฟอร์มนี้)</button>
+      <button class="submit" id="submit" type="button">📤 บันทึก &amp; แจ้งกลุ่ม</button>
     </div>
   </div>
 
   <div id="done" class="center" style="display:none">
     <div class="ic ok">✓</div>
-    <h2 id="done-title">ส่งแล้ว</h2>
-    <p id="done-message">บันทึกจำนวนจริงลงระบบ และแจ้งกลุ่ม LINE เรียบร้อย</p>
+    <h2 id="done-title">บันทึกแล้ว</h2>
+    <p id="done-message">ตรวจผลบันทึกและสถานะการแจ้ง LINE</p>
     <p style="margin-top:10px;font-size:12px;color:#94a3b8">ปิดหน้านี้ได้เลย</p>
   </div>
 
@@ -81,154 +87,11 @@
     <div class="ic err">!</div>
     <h2>เกิดข้อผิดพลาด</h2>
     <p id="error-msg">ไม่สามารถโหลดบิลได้</p>
+    <button class="secondary" id="reload-bill" type="button">ลองโหลดบิลอีกครั้ง</button>
   </div>
 </div>
 
-<script>
-  const API_URL = "https://script.google.com/macros/s/AKfycbzChvW0QxMVRQTG2vvJIhPKCbRKQfcas_n58dGlYJaRp-b6mqdt9ebKAHtEx9HO48w/exec";
-  const params = new URLSearchParams(location.search);
-  const UID = params.get("uid") || "";
-  const TOKEN = (params.get("token") || "").replace(/ /g, "+");
-  let ITEMS = [];
-
-  const $ = id => document.getElementById(id);
-  function show(which){ ["loading","form","done","error"].forEach(s => $(s).style.display = s===which ? (s==="form"?"block":"block") : "none"); }
-  function fail(msg){ $("error-msg").textContent = msg || "เกิดข้อผิดพลาด"; show("error"); }
-
-  function isMockMode(){
-    return params.get("mock") === "1";
-  }
-  const SAMPLE_BILL = {
-    billType: "บิลจัด", assignee: "หมวย", requester: "สมชาย", lineStatus: "pending", billNo: 1,
-    items: [
-      { name: "นมข้นหวาน", qty: 5, unit: "ลัง" },
-      { name: "ผงวุ้น", qty: 3, unit: "ถุง" },
-      { name: "กลิ่นนมเนยครีม(ใหญ่)", qty: 10, unit: "ลัง" }
-    ],
-    problemItems: []
-  };
-
-  async function load(){
-    if(isMockMode()){ render(SAMPLE_BILL); return; }
-    if(!UID || !TOKEN){ return fail("ลิงก์ไม่ถูกต้อง (ไม่มี uid/token)"); }
-    try{
-      const res = await fetch(API_URL + "?action=getBill&uid=" + encodeURIComponent(UID) + "&token=" + encodeURIComponent(TOKEN));
-      const data = await res.json();
-      if(!data.success){ return fail(data.message || "ไม่พบบิล"); }
-      render(data.bill);
-    }catch(e){ fail("เชื่อมต่อเซิร์ฟเวอร์ไม่ได้"); }
-  }
-
-  function render(bill){
-    ITEMS = bill.items || [];
-    $("bill-meta").innerHTML =
-      '<span>' + esc(bill.billType||"") + (bill.billNo ? ' #' + padBillNo(bill.billNo) : '') + '</span>' +
-      '<span>· มอบให้ @' + esc(bill.assignee||"-") + '</span>';
-    $("reporter").textContent = bill.assignee || "-";
-    // merge any previous problem report
-    const prev = {};
-    (bill.problemItems||[]).forEach(p => prev[String(p.name).trim()] = p);
-
-    const wrap = $("items");
-    wrap.innerHTML = "";
-    ITEMS.forEach((it, i) => {
-      const p = prev[String(it.name).trim()] || {};
-      const startQty = Number((p.actualQty != null) ? p.actualQty : it.qty) || 0;
-      const note = p.note || "";
-      const el = document.createElement("div");
-      el.className = "item";
-      el.dataset.i = i;
-      el.innerHTML =
-        '<div class="top"><div><div class="nm"></div><div class="req">เบิก ' + (Number(it.qty)||0) + ' ' + esc(it.unit) + '</div></div>'+
-        '<span class="badge ok" data-badge>ครบ ✓</span></div>'+
-        '<div class="qbox"><label id="qlbl-'+ i +'">ได้จริง</label>'+
-        '<div class="stepper"><button type="button" data-d="-1" aria-label="ลด 1">−</button>'+
-        '<input type="number" min="0" data-q value="'+ startQty +'" aria-labelledby="qlbl-'+ i +'"><button type="button" data-d="1" aria-label="เพิ่ม 1">+</button></div>'+
-        '<span class="unit">'+ esc(it.unit) +'</span></div>'+
-        '<div class="note"><span class="nl" id="nlbl-'+ i +'">หมายเหตุ (ทำไมไม่ครบ)</span>'+
-        '<textarea rows="2" data-note aria-labelledby="nlbl-'+ i +'" placeholder="เช่น ของเหลือไม่พอ รอเข้าใหม่">'+ esc(note) +'</textarea></div>';
-      el.querySelector(".nm").textContent = it.name;
-      wrap.appendChild(el);
-    });
-    refresh();
-    show("form");
-  }
-
-  function esc(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
-  function padBillNo(n){ const x=Number(n); return (!Number.isFinite(x)||x<=0) ? "" : ("000"+Math.floor(x)).slice(-3); }
-
-  function refresh(){
-    let short = [];
-    document.querySelectorAll(".item").forEach(el=>{
-      const i=+el.dataset.i, it=ITEMS[i];
-      const req=Number(it.qty)||0;
-      const q=Math.max(0,+el.querySelector("[data-q]").value||0);
-      const badge=el.querySelector("[data-badge]");
-      if(q < req){
-        el.classList.add("short");
-        badge.className="badge lack"; badge.textContent="ขาด "+(req-q);
-        short.push({name:it.name,unit:it.unit,req:req,got:q});
-      }else{
-        el.classList.remove("short");
-        badge.className="badge ok"; badge.textContent="ครบ ✓";
-      }
-    });
-    const s=$("summary");
-    if(short.length===0){
-      s.innerHTML='<div class="allok">✓ ครบทุกรายการ — กดบันทึกเพื่อแจ้งสถานะ</div>';
-    }else{
-      s.innerHTML='<div style="font-weight:700;margin-bottom:6px">สรุปของขาด '+short.length+' รายการ</div>'+
-        short.map(x=>'<div class="srow"><span>'+esc(x.name)+'</span><b>'+x.got+'/'+x.req+' '+esc(x.unit)+' (ขาด '+(x.req-x.got)+')</b></div>').join("");
-    }
-  }
-
-  document.addEventListener("input", e=>{ if(e.target.matches("[data-q]")) refresh(); });
-  document.addEventListener("click", e=>{
-    const b=e.target.closest("[data-d]"); if(!b) return;
-    const inp=b.parentElement.querySelector("[data-q]");
-    inp.value=Math.max(0,(+inp.value||0)+(+b.dataset.d));
-    refresh();
-  });
-
-  $("submit").addEventListener("click", async ()=>{
-    const btn=$("submit"); btn.disabled=true; btn.textContent="กำลังบันทึก…";
-    if(isMockMode()){
-      if(params.get("lineFail")==="1"){
-        $("done-title").textContent="บันทึกแล้ว แต่ยังแจ้ง LINE ไม่สำเร็จ";
-        $("done-message").textContent="Fixture: บันทึกข้อมูลแล้ว แต่ LINE ไม่ตอบกลับ กรุณาแจ้งหัวหน้างานให้ตรวจสอบกลุ่ม LINE";
-      }
-      setTimeout(()=>show("done"), 400);
-      return;
-    }
-    const items=[...document.querySelectorAll(".item")].map(el=>{
-      const i=+el.dataset.i, it=ITEMS[i];
-      return {
-        name: it.name,
-        unit: it.unit,
-        actualQty: Math.max(0,+el.querySelector("[data-q]").value||0),
-        note: (el.querySelector("[data-note]").value||"").trim()
-      };
-    });
-    try{
-      const res=await fetch(API_URL,{
-        method:"POST",
-        headers:{"Content-Type":"text/plain;charset=utf-8"},
-        body:JSON.stringify({action:"reportProblem", uid:UID, token:TOKEN, items:items})
-      });
-      const data=await res.json();
-      if(!data.success){ throw new Error(data.message||"บันทึกไม่สำเร็จ"); }
-      if(data.warning){
-        $("done-title").textContent="บันทึกแล้ว แต่ยังแจ้ง LINE ไม่สำเร็จ";
-        $("done-message").textContent=data.warning+" กรุณาแจ้งหัวหน้างานให้ตรวจสอบกลุ่ม LINE";
-      }
-      show("done");
-    }catch(e){
-      btn.disabled=false; btn.textContent="📤 บันทึก & แจ้งกลุ่ม";
-      alert(e.message||"บันทึกไม่สำเร็จ");
-    }
-  });
-
-  load();
-</script>
+<script src="js/picking-problem-client.js?v=20260918.02"></script>
+<script src="js/picking-problem-page.js?v=20260918.02"></script>
 </body>
 </html>

@@ -7,14 +7,15 @@ const c={state:{session:{token:'fixture'}},APP_CONFIG:{STORAGE_KEY:'session'},CA
  readCache:key=>cached?(key==='products'?[{id:'product'}]:{rev:'fixture-revision'}):null,
  apiCall:async(action,data)=>{calls.push({action,data});if(denied)throw Object.assign(Error('permission_denied'),{status:403});return {success:true,products:[{id:'product'}]};},
  applyBootstrapData:()=>applied++,isMockMode:()=>mock,localStorage:{setItem:()=>{storageAttempts++;throw Error('quota');}},
- clearPendingSsoToken(){},showApp:()=>shown++,reconcilePendingSubmit(){},console:{warn(){}}};
+ clearPendingSsoToken(){},showApp:()=>shown++,reconcilePendingSubmit(){},updateActionControls(){},console:{warn(){}}};
 vm.createContext(c);vm.runInContext(html.slice(start,end),c);
 (async()=>{
  await c.loadBootstrap(false);assert.equal(shown,1);assert.equal(applied,1);assert.equal(nodes.get('form-status').textContent,'พร้อมทำรายการ');
  assert.equal(calls[0].data.includeProducts,true);assert.equal(calls[0].data.includeRequisitions,true);
  cached=true;await c.loadBootstrap(true);assert.equal(calls[1].data.includeProducts,false);assert.equal(calls[1].data.includeRequisitions,false);assert.equal(calls[1].data.historyRev,'fixture-revision');
  await c.loadBootstrap(false,{allowCachedData:false});assert.equal(calls[2].data.includeProducts,true);assert.equal(calls[2].data.includeRequisitions,true);
- console.log('PASS authenticated bootstrap survives storage quota; cached/forced read flags preserved');
+ assert.equal(storageAttempts,0,'bootstrap never persists a JWT or full session in localStorage');
+ console.log('PASS authenticated bootstrap has no persistent JWT; cached/forced read flags preserved');
  mock=true;const beforeMock=storageAttempts;await c.loadBootstrap(false);assert.equal(storageAttempts,beforeMock,'mock bootstrap does not write real session');
  denied=true;const oldShown=shown,oldApplied=applied;await assert.rejects(c.loadBootstrap(false),/permission_denied/);assert.equal(shown,oldShown);assert.equal(applied,oldApplied);
  console.log('PASS authorization denial never applies or shows fetched data');

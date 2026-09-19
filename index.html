@@ -1,9 +1,10 @@
 <!DOCTYPE html>
 <html lang="th">
 <head>
+    <script src="js/akra-shell-bridge.js?v=20260918.02"></script>
+  <script src="js/supabase-picking-client.js?v=20260918.02"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link rel="preconnect" href="https://script.google.com">
   <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
   <title>เบิกสินค้า AKRA</title>
   <link rel="stylesheet" href="assets/app.css">
@@ -65,6 +66,7 @@
     }
     .btn:active { transform: translateY(1px); }
     .btn:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
+    #restore-pending-btn.hidden { display: none; }
     .input {
       width: 100%;
       min-height: 2.75rem;
@@ -278,6 +280,7 @@
               <i data-lucide="send" class="w-5 h-5"></i>
               ส่งเข้า LINE กลุ่ม
             </button>
+            <button id="restore-pending-btn" type="button" class="btn w-full hidden">กู้คืนคำขอค้าง</button>
           </form>
 
           <aside class="panel overflow-hidden" aria-label="ตัวอย่าง LINE">
@@ -323,7 +326,7 @@
         </div>
       </section>
 
-      <section id="pane-history" class="hidden" aria-labelledby="tab-history">
+      <section data-shell-clean id="pane-history" class="hidden" aria-labelledby="tab-history">
         <div class="panel p-4 sm:p-5">
           <div class="flex flex-col md:flex-row md:items-end gap-3 mb-4">
             <div class="flex-1">
@@ -356,7 +359,7 @@
   <div id="toast-container" class="toast-container" aria-live="polite" aria-atomic="true"></div>
   <div id="sr-status" class="visually-hidden" aria-live="polite"></div>
   <script>
-    const CURRENT_VERSION = "20260914.01";
+    const CURRENT_VERSION = "20260918.02";
     async function checkAppVersion() {
       try {
         const res = await fetch('version.json?t=' + Date.now());
@@ -478,13 +481,11 @@
     })();
 
     const APP_CONFIG = {
-      API_URL: "https://script.google.com/macros/s/AKfycbyQJLwb5HTexG6gxqTehGWlAxfSXVT--CpWnnp2JTcP4xCcMA1vUjSY_eWqPjUKwzq7/exec",
       PORTAL_URL: "https://akra-web.github.io/Main/",
       APP_ID: "app-pick",
       STORAGE_KEY: "akra_pick_session"
     };
 
-    var DATA_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzChvW0QxMVRQTG2vvJIhPKCbRKQfcas_n58dGlYJaRp-b6mqdt9ebKAHtEx9HO48w/exec";
     const PENDING_SSO_KEY = "akra_pick_pending_sso";
     const PERF_ENABLED = new URLSearchParams(window.location.search).get("perf") === "1";
     const CACHE_KEYS = {
@@ -504,7 +505,6 @@
     const HISTORY_PAGE_SIZE = 40;
     const LINE_ATTEMPT_LEASE_MS = 2 * 60 * 1000;
     const LINE_RETRY_WINDOW_MS = 24 * 60 * 60 * 1000;
-    const PENDING_SUBMIT_TTL_MS = 24 * 60 * 60 * 1000;
 
     const BILL_TYPES = {
       "บิลจัด": {
@@ -550,9 +550,9 @@
         { id: "P005", name: "ผงวุ้น", defaultUnit: "ถุง", active: true }
       ],
       staff: [
-        { name: "PeTer 2️⃣⏺️⏺️2️⃣", active: true },
-        { name: "หมวย", active: true },
-        { name: "โอ๊ต", active: true }
+        { id: "preview-1", name: "PeTer 2️⃣⏺️⏺️2️⃣", active: true },
+        { id: "preview-2", name: "หมวย", active: true },
+        { id: "preview-3", name: "โอ๊ต", active: true }
       ],
       requisitions: []
     };
@@ -584,6 +584,12 @@
 
     const el = {};
     const mockCache = Object.create(null);
+    const pickingClient = window.AkraSupabasePicking.create({
+      storage: { getItem: key => localStorage.getItem(key), setItem: (key, value) => localStorage.setItem(key, value), removeItem: key => localStorage.removeItem(key) },
+      getUser: () => state.session,
+      getToken: () => window.AkraModule?.embedded ? window.AkraModule.getToken() : state.session?.token || '',
+      requestId: createClientRequestId
+    });
 
     function $(id) {
       return document.getElementById(id);
@@ -618,29 +624,26 @@
 
     function readCache(key, ttlMs) {
       try {
-        const raw = isMockMode() ? mockCache[key] : localStorage.getItem(key);
-        if (!raw) return null;
-        const cached = JSON.parse(raw);
-        if (!cached || !cached.ts || Date.now() - cached.ts > ttlMs) return null;
-        return cached.data;
-      } catch (e) {
-        return null;
-      }
+        if (!isMockMode() && !pickingClient.can('viewRequisitions')) return null;
+        const raw = isMockMode() ? mockCache[key] : localStorage.getItem(pickingClient.storageKey(key));
+        const cached = JSON.parse(raw || 'null');
+        return cached && cached.ts && Date.now() - cached.ts <= ttlMs ? cached.data : null;
+      } catch (_) { return null; }
     }
 
-    function setCache(key, data) {
+    function setCache(key, data, owner = state.session?.identityId) {
       try {
-        const value = JSON.stringify({ ts: Date.now(), data: data });
+        if (owner !== state.session?.identityId) return;
+        const value = JSON.stringify({ ts: Date.now(), data });
         if (isMockMode()) mockCache[key] = value;
-        else localStorage.setItem(key, value);
-      } catch (e) {
-        console.warn("Cache write skipped:", key, e);
-      }
+        else if (pickingClient.can('viewRequisitions')) localStorage.setItem(pickingClient.storageKey(key), value);
+      } catch (_) { /* Read caches are optional; pending writes are not. */ }
     }
 
     function setCacheDeferred(key, data) {
-      const write = function () { setCache(key, data); };
-      if (typeof window.requestIdleCallback === "function") window.requestIdleCallback(write, { timeout: 1500 });
+      const owner = state.session?.identityId;
+      const write = () => setCache(key, data, owner);
+      if (typeof window.requestIdleCallback === 'function') window.requestIdleCallback(write, { timeout: 1500 });
       else window.setTimeout(write, 0);
     }
 
@@ -669,84 +672,30 @@
     }
 
     
-    function decodeJwtPayload(token) {
-        try {
-            if (!token || typeof token !== 'string') return null;
-            const parts = token.split('.');
-            if (parts.length !== 3) return null;
-            const payloadBase64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
-            const json = typeof Buffer !== 'undefined'
-                ? Buffer.from(payloadBase64, 'base64').toString('utf8')
-                : decodeURIComponent(escape(atob(payloadBase64)));
-            const parsed = JSON.parse(json);
-            if (parsed && parsed.exp && parsed.exp * 1000 < Date.now()) return null;
-            return parsed;
-        } catch (e) { return null; }
-    }
+
 
     function resolveBootSession(params) {
-      const urlToken = params.get("sso");
-      if (urlToken) {
-        const token = urlToken.replace(/ /g, "+");
-        persistPendingSsoToken(token);
-        if (!isMockMode()) localStorage.removeItem(APP_CONFIG.STORAGE_KEY);
-        const jwtUser = typeof decodeJwtPayload === 'function' ? decodeJwtPayload(token) : null;
-        const session = jwtUser ? { id: jwtUser.id, name: jwtUser.name || jwtUser.id, roles: jwtUser.roles || [], perms: jwtUser.perms || {}, token: token } : null;
-        return { token: token, fresh: true, fromUrl: true, session: session };
-      }
-      const pendingToken = readPendingSsoToken();
-      if (pendingToken) return { token: pendingToken, fresh: true, fromUrl: false, session: null };
-      const saved = localStorage.getItem(APP_CONFIG.STORAGE_KEY);
-      if (!saved) throw new Error("no_session");
-      const session = JSON.parse(saved);
-      if (!session || !session.token) throw new Error("no_session");
-      return { token: session.token, fresh: false, fromUrl: false, session: session };
+      if (window.AkraModule?.embedded) return { token: window.AkraModule.getToken(), fromUrl: false };
+      const urlToken = params.get('sso');
+      if (urlToken) return { token: urlToken.replace(/ /g, '+'), fromUrl: true };
+      const token = readPendingSsoToken();
+      if (token) return { token, fromUrl: false };
+      // One-time compatibility read; verify before using any cached identity/data.
+      let saved;
+      try { saved = JSON.parse(localStorage.getItem(APP_CONFIG.STORAGE_KEY) || 'null'); } catch (_) {}
+      if (!saved?.token) throw new Error('no_session');
+      return { token: saved.token, fromUrl: false };
     }
 
-    function pendingSubmitStorageKey() {
-      const userId = state.session && (state.session.id || state.session.name);
-      return userId ? CACHE_KEYS.PENDING_SUBMIT + ":" + encodeURIComponent(userId) : "";
-    }
 
-    function persistPendingSubmit(snapshot) {
-      if (isMockMode() || !snapshot || !snapshot.clientRequestId) return;
-      const key = pendingSubmitStorageKey();
-      if (!key) return;
-      try {
-        localStorage.setItem(key, JSON.stringify({ ts: Date.now(), snapshot: snapshot }));
-      } catch (e) {
-        // Browser storage is a durability aid; the live submit must still proceed.
-      }
-    }
+
+
 
     function readPendingSubmit() {
-      if (isMockMode()) return null;
-      const key = pendingSubmitStorageKey();
-      if (!key) return null;
-      try {
-        const pending = JSON.parse(localStorage.getItem(key) || "null");
-        if (!pending || !pending.snapshot || !pending.snapshot.clientRequestId) return null;
-        if (!pending.ts || Date.now() - pending.ts > PENDING_SUBMIT_TTL_MS) {
-          localStorage.removeItem(key);
-          return null;
-        }
-        return pending.snapshot;
-      } catch (e) {
-        return null;
-      }
+      return isMockMode() ? null : pickingClient.pending();
     }
 
-    function clearPendingSubmit(clientRequestId) {
-      if (isMockMode()) return;
-      const key = pendingSubmitStorageKey();
-      if (!key) return;
-      try {
-        const pending = readPendingSubmit();
-        if (!pending || !clientRequestId || pending.clientRequestId === clientRequestId) localStorage.removeItem(key);
-      } catch (e) {
-        // A cleanup failure must not change the confirmed server result.
-      }
-    }
+
 
     function prepareProducts(products) {
       return (products || []).filter(function (p) { return p.active !== false; }).map(function (p) {
@@ -831,8 +780,8 @@
     }
 
     function isMockMode() {
-      const searchParams = new URLSearchParams(window.location.search);
-      return searchParams.get("mock") === "1";
+      return !window.AkraModule?.embedded && ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname) &&
+        new URLSearchParams(window.location.search).get('mock') === '1';
     }
 
     function createClientRequestId() {
@@ -841,91 +790,32 @@
     }
 
     async function apiCall(action, data, options) {
-      if (action !== "getInitialData" && action !== "bootstrap" && await AppVersionGuard.blockIfStale(action)) {
-        throw new Error("พบเวอร์ชันใหม่ กรุณารีโหลดก่อนทำรายการ");
-      }
-      if (isMockMode()) {
-        return mockApi(action, data);
-      }
-      if (typeof window !== 'undefined' && window.AkraSupabasePicking && (action === 'bootstrap' || action === 'getInitialData' || action === 'getRequisitions' || action === 'saveRequisition')) {
-        try {
-          if (action === 'bootstrap' || action === 'getInitialData') {
-            const historyPromise = AkraSupabasePicking.getRequisitions(50);
-            let productsPromise = Promise.resolve((state.products && state.products.length) ? state.products : null);
-            if (!state.products || !state.products.length) {
-              const cachedProd = readCache(CACHE_KEYS.PRODUCTS, CACHE_TTL_MS.PRODUCTS);
-              if (cachedProd && cachedProd.length) {
-                productsPromise = Promise.resolve(cachedProd);
-              } else {
-                productsPromise = AkraSupabasePicking.getProducts();
-              }
-            }
-            const staffPromise = AkraSupabasePicking.getStaff();
-            const [history, prods, staff] = await Promise.all([historyPromise, productsPromise, staffPromise]);
-            return {
-              success: true,
-              user: state.session,
-              products: prods || [],
-              staff: staff || [],
-              requisitions: (history && history.bills) || [],
-              rev: 'supa-' + Date.now()
-            };
-          }
-          if (action === 'getRequisitions') {
-            const history = await AkraSupabasePicking.getRequisitions(50);
-            return { success: true, requisitions: (history && history.bills) || [], rev: 'supa-' + Date.now() };
-          }
-          if (action === 'saveRequisition') {
-            const res = await AkraSupabasePicking.saveRequisition({
-              billType: data.billType,
-              assignee: data.assignee,
-              requester: (state.session && (state.session.name || state.session.id)) || 'ผู้ใช้งาน',
-              items: data.items,
-              clientRequestId: data.clientRequestId || (options && options.requestId)
-            });
-            return res;
-          }
-        } catch (supaErr) {
-          console.warn('Supabase Picking error, falling back to GAS:', supaErr);
-        }
-      }
-      const mark = perfStart("api:" + action);
-      const fetchOptions = {
-        method: "POST",
-        headers: { "Content-Type": "text/plain;charset=utf-8" },
-        body: JSON.stringify({
-          action: action,
-          data: data || {},
-          token: state.session && state.session.token,
-          requestId: (options && options.requestId) || ""
-        })
-      };
-      if (options && options.priority) fetchOptions.priority = options.priority;
+      const operation = () => transportApiCall(action, data, options);
       try {
-        const res = await fetch(DATA_SCRIPT_URL, fetchOptions);
-        const text = await res.text();
-        let result;
-        try {
-          result = JSON.parse(text);
-        } catch (e) {
-          throw new Error("อ่านผลลัพธ์จากเซิร์ฟเวอร์ไม่ได้");
+        return await (window.AkraModule && ['saveRequisition', 'retryLine'].includes(action)
+          ? window.AkraModule.runMutation(operation) : operation());
+      } catch (error) {
+        if (error.status === 401 || (error.reason === 'permission_denied' && ['bootstrap', 'getInitialData', 'getRequisitions', 'getRev'].includes(action))) {
+          state.authDenied = true;
+          showError(error.message);
         }
-        if (!result || result.success === false || result.status === "error") {
-          const err = new Error((result && result.message) || "ทำรายการไม่สำเร็จ");
-          err.result = result;
-          throw err;
-        }
-        return result;
-      } finally {
-        perfEnd(mark);
+        throw error;
       }
+    }
+
+    async function transportApiCall(action, data, options) {
+      if (['saveRequisition', 'retryLine'].includes(action) && await AppVersionGuard.blockIfStale(action)) {
+        throw new Error('พบเวอร์ชันใหม่ กรุณารีโหลดก่อนทำรายการ');
+      }
+      if (isMockMode()) return mockApi(action, data);
+      return pickingClient.call(action, data || {});
     }
 
     function mockApi(action, data) {
       if (!isMockMode()) return Promise.reject(new Error("Mock mode requires ?mock=1"));
       if (action === "bootstrap") {
         const result = JSON.parse(JSON.stringify(Object.assign({ success: true }, SAMPLE_DATA)));
-        result.user = { id: "preview", name: "พนักงานคลังสินค้า (Mock)", roles: ["ADMIN"], perms: { "app-pick": ["createRequisition"] } };
+        result.user = { apps: ["app-pick"], id: "preview", name: "พนักงานคลังสินค้า (Mock)", roles: ["ADMIN"], perms: { "app-pick": ["createRequisition"] } };
         result.rev = state.lastRev || "mock-1";
         if (data && data.includeProducts === false) delete result.products;
         if (data && data.includeRequisitions === false && data.historyRev === result.rev) delete result.requisitions;
@@ -990,16 +880,8 @@
     }
 
     function applyBootstrapData(result) {
-      const token = state.session && state.session.token;
-      if (result.user) {
-        state.session = {
-          token: token,
-          id: result.user.id || "",
-          name: result.user.name || "",
-          roles: normalizeRoles(result.user.roles),
-          perms: result.user.perms || {}
-        };
-      }
+      const token = state.session?.token;
+      if (result.user) state.session = { ...result.user, token, roles: normalizeRoles(result.user.roles) };
       applyInitialData(result);
     }
 
@@ -1022,29 +904,18 @@
 
     async function loadBootstrap(silent, options) {
       try {
-        if (!silent) $("form-status").textContent = "กำลังโหลดข้อมูล...";
+        if (!silent) $('form-status').textContent = 'กำลังโหลดข้อมูล...';
         const allowCachedData = !options || options.allowCachedData !== false;
         const includeProducts = !allowCachedData || !readCache(CACHE_KEYS.PRODUCTS, CACHE_TTL_MS.PRODUCTS);
         const historyCache = allowCachedData ? readCache(CACHE_KEYS.REQUISITIONS, CACHE_TTL_MS.REQUISITIONS) : null;
-        const result = await apiCall("bootstrap", {
-          includeProducts: includeProducts,
-          includeRequisitions: !historyCache,
-          historyRev: (historyCache && historyCache.rev) || ""
-        }, options);
+        const result = await apiCall('bootstrap', { includeProducts, includeRequisitions: !historyCache, historyRev: historyCache?.rev || '' }, options);
         applyBootstrapData(result);
-        try {
-          if (!isMockMode()) localStorage.setItem(APP_CONFIG.STORAGE_KEY, JSON.stringify(state.session));
-        } catch (error) {
-          console.warn('Session cache write skipped; current session remains available in memory.');
-        }
-        clearPendingSsoToken();
         showApp();
+        $('form-status').textContent = 'พร้อมทำรายการ';
         reconcilePendingSubmit();
-        $("form-status").textContent = "พร้อมทำรายการ";
+        updateActionControls();
         return result;
-      } finally {
-        $("data-loading").classList.add("hidden");
-      }
+      } finally { $('data-loading').classList.add('hidden'); }
     }
 
     async function refreshRequisitions(options) {
@@ -1054,18 +925,9 @@
     }
 
     async function fetchDataRev() {
-      if (isMockMode()) return state.lastRev || "mock-1";
-      if (!DATA_SCRIPT_URL) return state.lastRev || "0";
-      const mark = perfStart("api:getRev");
-      try {
-        const url = DATA_SCRIPT_URL + "?action=getRev&t=" + Date.now();
-        const res = await fetch(url, { cache: "no-store", priority: "low" });
-        if (!res.ok) throw new Error("rev_failed");
-        const result = await res.json();
-        return result && result.rev ? String(result.rev) : "0";
-      } finally {
-        perfEnd(mark);
-      }
+      if (isMockMode()) return state.lastRev || 'mock-1';
+      const result = await apiCall('getRev');
+      return String(result.rev || '0');
     }
 
     function shouldPollUpdates() {
@@ -1073,7 +935,7 @@
         const watched = state.requisitions.find(function (req) { return req.uid === state.pendingWatchUid; });
         if (!shouldWatchRequisition(watched)) state.pendingWatchUid = "";
       }
-      return !!state.session && document.visibilityState === "visible" &&
+      return !!state.session && !state.authDenied && document.visibilityState === "visible" &&
         (state.activeTab === "history" || !!state.pendingWatchUid);
     }
 
@@ -1121,13 +983,15 @@
 
     function renderStaff() {
       const select = $("staff-select");
+      const selected = select.value;
       select.innerHTML = '<option value="">เลือกพนักงาน</option>';
       state.staff.forEach(function (staff) {
         const option = document.createElement("option");
-        option.value = staff.name;
+        option.value = staff.id;
         option.textContent = staff.name;
         select.appendChild(option);
       });
+      select.value = selected;
       if (state.staff.length === 0) {
         const option = document.createElement("option");
         option.value = "";
@@ -1401,8 +1265,8 @@
           '</li>';
         }).join("");
       }
-      const staff = $("staff-select").value;
-      $("line-preview-staff").textContent = staff ? "@" + staff : "-";
+      const staff = state.staff.find(row => row.id === $('staff-select').value);
+      $('line-preview-staff').textContent = staff ? '@' + staff.name : '-';
       $("line-preview-meta").textContent = "บิลใหม่ · " + formatThaiDateTime(new Date());
       $("preview-status").textContent = "รอจัด";
       $("preview-status").className = "text-xs font-bold rounded-full px-2.5 py-1 bg-slate-100 text-slate-600";
@@ -1448,14 +1312,14 @@
           return;
         }
         const exact = exactProductByName(name);
-        if (exact) {
+        if (exact && !state.retryClientRequestId) {
           item.name = exact.name;
           item.unit = exact.defaultUnit || unit;
           item.isFreeText = false;
         } else {
           item.name = name;
           item.unit = unit;
-          item.isFreeText = true;
+          item.isFreeText = state.retryClientRequestId ? item.isFreeText === true : true;
         }
         item.qty = qty;
         prepared.push({
@@ -1558,108 +1422,87 @@
       });
       setBillType(snapshot.billType);
       renderItemRows();
-      $("staff-select").value = snapshot.assignee;
+      $('staff-select').value = snapshot.assigneeId;
       renderPreview();
     }
 
-    function reconcilePendingSubmit() {
-      const snapshot = readPendingSubmit();
-      if (!snapshot) return;
-      const persisted = state.requisitions.find(function (req) {
-        return req.clientRequestId === snapshot.clientRequestId;
-      });
-      if (persisted) {
-        const restored = state.retryClientRequestId === snapshot.clientRequestId;
-        clearPendingSubmit(snapshot.clientRequestId);
-        state.retryClientRequestId = "";
-        if (restored) resetForm();
-        return;
+    function reconcilePendingSubmit(force = false) {
+      try {
+        const snapshot = readPendingSubmit();
+        $('restore-pending-btn').classList.toggle('hidden', !snapshot);
+        if (!snapshot || (!force && state.retryClientRequestId === snapshot.clientRequestId)) return;
+        // History is shared by the team; only actor-scoped replay acknowledges a request.
+        state.retryClientRequestId = snapshot.clientRequestId;
+        restoreSubmitSnapshot(snapshot);
+        window.AkraModule?.markDirty();
+        $('form-status').textContent = 'มีคำขอที่ยังไม่ทราบผล · ส่งข้อมูลเดิมเพื่อตรวจบิลเดิม';
+      } catch (error) {
+        state.pendingBlocked = true;
+        $('form-status').textContent = error.message;
+        toast(error.message, 'warning');
       }
-      if (state.retryClientRequestId === snapshot.clientRequestId) return;
-      state.retryClientRequestId = snapshot.clientRequestId;
-      restoreSubmitSnapshot(snapshot);
-      toast("พบรายการที่ยังไม่ยืนยันผล กดส่งอีกครั้งเพื่อใช้คำขอเดิมโดยไม่สร้างบิลซ้ำ", "warning");
     }
 
     async function submitRequisition(event) {
       event.preventDefault();
-      if (state.isSubmitting) return;
-      const submitItems = collectSubmitItems();
-      if (!submitItems || !validateSubmit(submitItems)) return;
-      const snapshot = {
-        billType: state.billType,
-        assignee: $("staff-select").value,
-        items: cloneSubmitItems(submitItems),
-        clientRequestId: state.retryClientRequestId || createClientRequestId()
-      };
-      persistPendingSubmit(snapshot);
-      const optimistic = createOptimisticRequisition(snapshot);
-      replaceRequisition(optimistic.uid, optimistic);
-      resetForm();
-      state.isSubmitting = true;
-      $("submit-btn").disabled = true;
-      $("form-status").textContent = "ส่งข้อมูลแล้ว กำลังยืนยันผล...";
-      const mark = perfStart("submit:saveRequisition");
+      if (state.isSubmitting || (!isMockMode() && !pickingClient.can('createRequisition'))) return;
+      const items = collectSubmitItems();
+      if (!items || !validateSubmit(items)) return;
+      let snapshot;
       try {
-        const result = await apiCall("saveRequisition", {
-          billType: snapshot.billType,
-          assignee: snapshot.assignee,
-          items: snapshot.items,
-          clientRequestId: snapshot.clientRequestId
-        }, { requestId: snapshot.clientRequestId });
-        state.retryClientRequestId = "";
-        if (result.saved) clearPendingSubmit(snapshot.clientRequestId);
+        const staff = state.staff.find(row => row.id === $('staff-select').value);
+        const data = { billType: state.billType, assigneeId: staff?.id, assignee: staff?.name || '', items: cloneSubmitItems(items), clientRequestId: state.retryClientRequestId || undefined };
+        snapshot = isMockMode() ? { ...data, clientRequestId: createClientRequestId() } : pickingClient.prepare(data);
+      } catch (error) {
+        toast(error.message, 'warning');
+        $('form-status').textContent = error.message;
+        return;
+      }
+      state.retryClientRequestId = snapshot.clientRequestId;
+      window.AkraModule?.markDirty();
+      setFormBusy(true);
+      $('form-status').textContent = 'กำลังบันทึกและตรวจสถานะ LINE...';
+      try {
+        const result = await apiCall('saveRequisition', snapshot);
+        if (result.saved !== true || !result.requisition?.uid) throw new Error('ยังยืนยันผลไม่ได้ กรุณาส่งซ้ำด้วยคำขอเดิม');
         state.lastRev = result.rev || state.lastRev;
-        if (result.requisition) {
-          delete state.localStatusByUid[result.requisition.uid];
-          replaceRequisition(optimistic.uid, result.requisition);
-          setCache(CACHE_KEYS.REQUISITIONS, { requisitions: state.requisitions, rev: state.lastRev });
-          state.pendingWatchUid = shouldWatchRequisition(result.requisition) ? result.requisition.uid : "";
-        }
-        const persistedStatus = result.requisition && result.requisition.lineStatus;
+        delete state.localStatusByUid[result.requisition.uid];
+        replaceRequisition('', result.requisition);
+        setCache(CACHE_KEYS.REQUISITIONS, { requisitions: state.requisitions, rev: state.lastRev });
+        state.pendingWatchUid = shouldWatchRequisition(result.requisition) ? result.requisition.uid : '';
+        state.retryClientRequestId = '';
+        resetForm();
+        window.AkraModule?.markSaved();
+        $('restore-pending-btn').classList.add('hidden');
         if (needsLineRecovery(result)) {
-          toast(result.message || "บันทึกแล้ว แต่ยังส่ง LINE ไม่สำเร็จ", "warning");
-          $("form-status").textContent = persistedStatus === "line_failed" ? "บันทึกแล้ว · ต้องตรวจสอบ LINE กับหัวหน้างาน" : "บันทึกแล้ว · รอตรวจสอบสถานะ LINE";
+          toast(result.message || 'บันทึกบิลแล้ว · รอตรวจสอบสถานะ LINE', 'warning');
+          $('form-status').textContent = 'บันทึกแล้ว · รอตรวจสอบสถานะ LINE';
         } else {
-          toast(result.preview ? "บันทึกตัวอย่างแล้ว" : "ส่งเข้า LINE และบันทึกแล้ว", "success");
-          $("form-status").textContent = "พร้อมทำรายการ";
+          toast(result.preview ? 'บันทึกตัวอย่างแล้ว' : 'บันทึกแล้ว และ LINE รับคำขอแล้ว', 'success');
         }
         scheduleNextPoll(REV_POLL_MIN_MS);
-      } catch (e) {
-        const serverReq = e.result && e.result.requisition;
-        if (e.result && e.result.idempotencyConflict) {
-          state.requisitions = state.requisitions.filter(function (row) { return row.uid !== optimistic.uid; });
-          state.historyDirty = true;
-          if (state.activeTab === "history") renderHistory();
-          const retrySnapshot = Object.assign({}, snapshot, { clientRequestId: createClientRequestId() });
-          state.retryClientRequestId = retrySnapshot.clientRequestId;
-          persistPendingSubmit(retrySnapshot);
-          restoreSubmitSnapshot(retrySnapshot);
-          toast(e.message, "warning");
-          $("form-status").textContent = "ข้อมูลที่แก้ไขยังไม่ได้บันทึก · ตรวจสอบแล้วกดส่งใหม่";
-        } else if (serverReq && e.result.saved) {
-          state.lastRev = e.result.rev || state.lastRev;
-          delete state.localStatusByUid[serverReq.uid];
-          replaceRequisition(optimistic.uid, serverReq);
-          setCache(CACHE_KEYS.REQUISITIONS, { requisitions: state.requisitions, rev: state.lastRev });
-          state.pendingWatchUid = shouldWatchRequisition(serverReq) ? serverReq.uid : "";
-          state.retryClientRequestId = "";
-          clearPendingSubmit(snapshot.clientRequestId);
-          toast(e.message, "warning");
-          $("form-status").textContent = serverReq.lineStatus === "line_failed" ? "บันทึกแล้ว · ต้องตรวจสอบ LINE กับหัวหน้างาน" : "บันทึกแล้ว · รอตรวจสอบสถานะ LINE";
-          scheduleNextPoll(REV_POLL_MIN_MS);
-        } else {
-          markOptimisticFailed(optimistic.uid, e.message, serverReq);
-          state.retryClientRequestId = snapshot.clientRequestId;
-          restoreSubmitSnapshot(snapshot);
-          toast(e.message, "error");
-          $("form-status").textContent = "ส่งไม่สำเร็จ";
-        }
-      } finally {
-        perfEnd(mark);
-        state.isSubmitting = false;
-        $("submit-btn").disabled = false;
-      }
+      } catch (error) {
+        // Unknown/conflicting results retain the same durable request and form.
+        if (error.notSaved === true) state.retryClientRequestId = '';
+        $('restore-pending-btn').classList.toggle('hidden', error.notSaved === true);
+        $('form-status').textContent = error.message;
+        toast(error.message, 'error');
+      } finally { setFormBusy(false); }
+    }
+
+    function setFormBusy(busy) {
+      state.isSubmitting = busy;
+      $('requisition-form').querySelectorAll('input,select,textarea,button').forEach(node => {
+        node.disabled = busy || (!isMockMode() && !pickingClient.can('createRequisition'));
+      });
+      updateActionControls();
+    }
+
+    function updateActionControls() {
+      const allowed = isMockMode() || pickingClient.can('createRequisition');
+      $('submit-btn').disabled = state.isSubmitting || state.pendingBlocked || !allowed;
+      $('tab-new').disabled = !allowed;
+      if (!allowed && state.activeTab === 'new') setTab('history');
     }
 
     function resetForm() {
@@ -1723,12 +1566,9 @@
     }
 
     function canRetryLine(req) {
-      if (!req) return false;
-      if (isLineRetryExpiredClient(req)) return false;
-      if (req.lineStatus === "pending_line") return true;
-      if (req.lineStatus !== "line_sending" || !req.lineAttemptAt) return false;
-      const attempt = new Date(req.lineAttemptAt);
-      return !Number.isNaN(attempt.getTime()) && Date.now() - attempt.getTime() >= LINE_ATTEMPT_LEASE_MS;
+      if (!req || (!isMockMode() && !pickingClient.can('retryLine'))) return false;
+      // The server owns leases/backoff/24h-from-first-attempt, not bill creation time.
+      return ['pending_line', 'line_sending'].includes(req.lineStatus) && req.retryable !== false;
     }
 
     function needsLineRecovery(result) {
@@ -1744,9 +1584,7 @@
     }
 
     function isLineRetryExpiredClient(req) {
-      if (!req || !req.timestamp) return false;
-      const created = new Date(req.timestamp);
-      return !Number.isNaN(created.getTime()) && Date.now() - created.getTime() >= LINE_RETRY_WINDOW_MS;
+      return req?.deliveryStatus === 'expired' || req?.lineStatus === 'line_failed';
     }
 
     function renderHistory() {
@@ -1828,7 +1666,7 @@
     }
 
     function bindEvents() {
-      $("portal-btn").addEventListener("click", function () { window.location.href = APP_CONFIG.PORTAL_URL; });
+      $("portal-btn").addEventListener("click", function () { window.AkraModule.home(APP_CONFIG.PORTAL_URL); });
       $("refresh-btn").addEventListener("click", function () {
         loadBootstrap(true, { requestId: createClientRequestId() }).catch(function (e) {
           const reason = (e.result && e.result.reason) || e.message;
@@ -1850,7 +1688,7 @@
           localStorage.removeItem(APP_CONFIG.STORAGE_KEY);
           clearPendingSsoToken();
         }
-        window.location.href = APP_CONFIG.PORTAL_URL;
+        window.AkraModule.logout(APP_CONFIG.PORTAL_URL);
       });
       $("tab-new").addEventListener("click", function () { setTab("new"); });
       $("tab-history").addEventListener("click", function () { setTab("history"); });
@@ -1864,7 +1702,9 @@
       });
       $("add-row-btn").addEventListener("click", function () { addRow(true); });
       $("staff-select").addEventListener("change", renderPreview);
-      $("requisition-form").addEventListener("submit", submitRequisition);
+      $('requisition-form').addEventListener('submit', submitRequisition);
+      $('restore-pending-btn').addEventListener('click', () => reconcilePendingSubmit(true));
+      $('requisition-form').addEventListener('change', () => window.AkraModule?.markDirty());
       $("history-search").addEventListener("input", function () { state.historyVisibleCount = HISTORY_PAGE_SIZE; renderHistory(); });
       $("history-date").addEventListener("change", function () { state.historyVisibleCount = HISTORY_PAGE_SIZE; renderHistory(); });
       $("history-type").addEventListener("change", function () { state.historyVisibleCount = HISTORY_PAGE_SIZE; renderHistory(); });
@@ -1872,69 +1712,46 @@
     }
 
     async function boot() {
-      AppVersionGuard.start({ current: CURRENT_VERSION, readActions: ["bootstrap", "getInitialData", "getRequisitions"] });
+      AppVersionGuard.start({ current: CURRENT_VERSION, readActions: ['bootstrap', 'getInitialData', 'getRequisitions', 'getRev'] });
       checkAppVersion();
       bindEvents();
-      setBillType("บิลจัด");
-      if (state.items.length === 0) addRow(false);
-      else renderItemRows();
+      setBillType('บิลจัด');
+      if (!state.items.length) addRow(false); else renderItemRows();
       renderPreview();
       showLoading();
-      let hadCache = false;
       try {
         if (isMockMode()) {
-          state.session = {
-            token: "mock",
-            id: "preview",
-            name: "พนักงานคลังสินค้า (Mock)",
-            roles: ["ADMIN"],
-            perms: { "app-pick": ["createRequisition"] }
-          };
-          showApp();
-          hadCache = hydrateCachedData();
-          await loadBootstrap(hadCache);
-          startRevPolling();
-          return;
+          state.session = { token: 'mock', id: 'preview', name: 'พนักงานคลังสินค้า (Mock)', roles: ['ADMIN'], apps: ['app-pick'], perms: {} };
+        } else {
+          const params = new URLSearchParams(window.location.search);
+          const session = resolveBootSession(params);
+          if (session.fromUrl) {
+            params.delete('sso');
+            const url = new URL(window.location.href); url.search = params.toString();
+            window.history.replaceState({}, document.title, url.toString());
+          }
+          const user = await window.AkraModule.verifySession('app-pick', session.token);
+          state.session = { ...user, token: window.AkraModule.embedded ? window.AkraModule.getToken() : session.token };
+          window.AkraModule.watchSession?.({appId:'app-pick', user, token:state.session.token,
+            invalidated:() => {
+              state.session = null; state.authDenied = true;
+              if (state.pollTimer) window.clearTimeout(state.pollTimer);
+              state.pollTimer = null; state.products = []; state.staff = []; state.requisitions = [];
+              showError('เซสชัน Main เปลี่ยนแล้ว กรุณาเปิด Picking จาก Main ใหม่ และตรวจผลรายการก่อนส่งซ้ำ');
+            },
+            refreshed:token => { if (state.session) state.session.token = token; }
+          });
+          if (!pickingClient.can('viewRequisitions')) throw Object.assign(new Error('ไม่มีสิทธิ์อ่านข้อมูล Picking'), { reason: 'permission_denied' });
+          try { localStorage.removeItem(APP_CONFIG.STORAGE_KEY); } catch (_) {}
+          if (window.AkraModule.embedded) clearPendingSsoToken(); else persistPendingSsoToken(session.token);
         }
-        const params = new URLSearchParams(window.location.search);
-        const bootSession = resolveBootSession(params);
-        if (bootSession.fromUrl) {
-          params.delete("sso");
-          const url = new URL(window.location.href);
-          url.search = params.toString();
-          window.history.replaceState({}, document.title, url.toString());
-        }
-        state.session = Object.assign({}, bootSession.session || {}, { token: bootSession.token });
-        if (!bootSession.fresh) {
-          showApp();
-          hadCache = hydrateCachedData();
-        }
-        await loadBootstrap(hadCache, {
-          allowCachedData: !bootSession.fresh,
-          priority: hadCache ? "low" : undefined,
-          requestId: createClientRequestId()
-        });
+        const cached = hydrateCachedData();
+        await loadBootstrap(cached, { allowCachedData: true });
+        setFormBusy(false);
         startRevPolling();
-      } catch (e) {
-        const reason = (e.result && e.result.reason) || e.message;
-        if (reason === "verify_failed") {
-          if (hadCache && state.session) {
-            showApp();
-            $("data-loading").classList.add("hidden");
-            $("form-status").textContent = "เชื่อมต่อเพื่อตรวจสอบสิทธิ์ไม่สำเร็จ · กดรีเฟรชเพื่อลองใหม่";
-            toast("เครือข่ายขัดข้องชั่วคราว ข้อมูลเดิมยังอยู่และยังไม่ถูกล้าง", "warning");
-            return;
-          }
-          return showError("เชื่อมต่อระบบตรวจสอบสิทธิ์ไม่สำเร็จ กรุณาลองรีเฟรชอีกครั้ง");
-        }
-        if (["no_token", "no_session", "invalid_or_expired_token", "permission_denied"].indexOf(reason) !== -1) {
-          if (!isMockMode()) {
-            localStorage.removeItem(APP_CONFIG.STORAGE_KEY);
-            clearPendingSsoToken();
-          }
-        }
-        const message = reason === "permission_denied" ? "คุณไม่มีสิทธิ์เข้าใช้งานแอปนี้" : "กรุณาเข้าสู่ระบบผ่าน Portal อีกครั้ง";
-        showError(message);
+      } catch (error) {
+        state.authDenied = true;
+        showError(error.reason === 'permission_denied' ? 'คุณไม่มีสิทธิ์อ่านข้อมูล Picking กรุณาตรวจสิทธิ์ใน Main' : 'ตรวจสอบเซสชันหรือโหลดข้อมูลไม่ได้ กรุณาเข้าใหม่จาก Main');
       }
     }
 
