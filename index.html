@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <html lang="th">
 <head>
-    <script src="js/akra-shell-bridge.js?v=20260918.05"></script>
-  <script src="js/supabase-picking-client.js?v=20260918.02"></script>
+    <script src="js/akra-shell-bridge.js?v=20261001.01"></script>
+  <script src="js/supabase-picking-client.js?v=20261001.01"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
-  <title>เบิกสินค้า AKRA</title>
+  <title>BUYMORETH | เบิกสินค้า</title>
   <link rel="stylesheet" href="assets/app.css">
   <script defer src="assets/lucide.min.js"></script>
   <style>
@@ -185,7 +185,7 @@
               <i data-lucide="package-check" class="w-5 h-5"></i>
             </div>
             <div class="min-w-0">
-              <h1 class="font-bold leading-tight truncate">เบิกสินค้า AKRA</h1>
+              <h1 class="font-bold leading-tight truncate">เบิกสินค้า</h1>
               <p class="text-xs text-white/75 truncate">
                 <span id="display-username">-</span>
                 <span aria-hidden="true"> · </span>
@@ -359,7 +359,7 @@
   <div id="toast-container" class="toast-container" aria-live="polite" aria-atomic="true"></div>
   <div id="sr-status" class="visually-hidden" aria-live="polite"></div>
   <script>
-    const CURRENT_VERSION = "20260918.05";
+    const CURRENT_VERSION = "20261001.01";
     async function checkAppVersion() {
       try {
         const res = await fetch('version.json?t=' + Date.now());
@@ -1737,7 +1737,7 @@
               state.session = null; state.authDenied = true;
               if (state.pollTimer) window.clearTimeout(state.pollTimer);
               state.pollTimer = null; state.products = []; state.staff = []; state.requisitions = [];
-              showError('เซสชัน Main เปลี่ยนแล้ว กรุณาเปิด Picking จาก Main ใหม่ และตรวจผลรายการก่อนส่งซ้ำ');
+              showError('เซสชัน BUYMORETH เปลี่ยนแล้ว กรุณาเปิด Picking จาก BUYMORETH ใหม่ และตรวจผลรายการก่อนส่งซ้ำ');
             },
             refreshed:token => { if (state.session) state.session.token = token; }
           });
@@ -1751,7 +1751,7 @@
         startRevPolling();
       } catch (error) {
         state.authDenied = true;
-        showError(error.reason === 'permission_denied' ? 'คุณไม่มีสิทธิ์อ่านข้อมูล Picking กรุณาตรวจสิทธิ์ใน Main' : 'ตรวจสอบเซสชันหรือโหลดข้อมูลไม่ได้ กรุณาเข้าใหม่จาก Main');
+        showError(error.reason === 'permission_denied' ? 'คุณไม่มีสิทธิ์อ่านข้อมูล Picking กรุณาตรวจสิทธิ์ใน BUYMORETH' : 'ตรวจสอบเซสชันหรือโหลดข้อมูลไม่ได้ กรุณาเข้าใหม่จาก BUYMORETH');
       }
     }
 

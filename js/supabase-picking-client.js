@@ -19,8 +19,8 @@
     return !defined.includes(key) ? legacy : Array.isArray(user.perms?.['app-pick']) && user.perms['app-pick'].includes(key);
   }
   function message(reason) {
-    if (reason === 'permission_denied') return 'ไม่มีสิทธิ์ดำเนินการนี้ กรุณาตรวจสิทธิ์ใน Main';
-    if (['no_token', 'identity_required', 'shell_session_unavailable', 'invalid_or_expired_token', 'session_changed'].includes(reason)) return 'เซสชันเปลี่ยนหรือหมดอายุ กรุณาเข้าใหม่จาก Main';
+    if (reason === 'permission_denied') return 'ไม่มีสิทธิ์ดำเนินการนี้ กรุณาตรวจสิทธิ์ใน BUYMORETH';
+    if (['no_token', 'identity_required', 'shell_session_unavailable', 'invalid_or_expired_token', 'session_changed'].includes(reason)) return 'เซสชันเปลี่ยนหรือหมดอายุ กรุณาเข้าใหม่จาก BUYMORETH';
     if (reason === 'pending_submission_mismatch') return 'มีคำขอที่ยังไม่ทราบผล กรุณากู้คืนคำขอค้างแล้วส่งข้อมูลเดิม ห้ามสร้างบิลใหม่แทน';
     if (reason === 'legacy_pending_reconciliation_required') return 'มีคำขอค้างจากระบบเดิม กรุณาให้ผู้ดูแลตรวจบิลเดิมก่อน ห้ามส่งใหม่เพื่อเลี่ยงบิลซ้ำ';
     if (reason.startsWith('pending_storage_')) return 'เก็บข้อมูลป้องกันบิลซ้ำไม่ได้ จึงยังไม่ได้ส่ง กรุณาตรวจพื้นที่จัดเก็บของเบราว์เซอร์';
